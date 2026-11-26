@@ -1,0 +1,21 @@
+services:
+  server:
+    build: ./server
+    ports:
+      - "8080:8080"
+    environment:
+      RUSTPOCKET_JWT_SECRET: ${RUSTPOCKET_JWT_SECRET:-change-me}
+      RUSTPOCKET_SANDBOX: docker
+      RUSTPOCKET_SANDBOX_IMAGE: rustpocket-sandbox:latest
+      RUSTPOCKET_DATABASE: /data/rustpocket.db
+      RUSTPOCKET_RUN_TIMEOUT: 10
+      RUSTPOCKET_RUNS_PER_MINUTE: 20
+      RUSTPOCKET_RUNS_PER_DAY: 300
+    volumes:
+      - rustpocket-data:/data
+      # Permet au serveur de lancer les conteneurs d'exécution.
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+volumes:
+  rustpocket-data:

@@ -1,0 +1,77 @@
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'api/api_client.dart';
+import 'screens/home_screen.dart';
+import 'screens/login_screen.dart';
+import 'storage/app_settings.dart';
+import 'storage/auth_store.dart';
+import 'storage/project_store.dart';
+import 'theme.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final prefs = await SharedPreferences.getInstance();
+
+  final settings = AppSettings.load(prefs);
+  final auth = AuthStore.load(prefs);
+  final projects = ProjectStore(prefs);
+  final api = ApiClient(
+    baseUrlProvider: () => settings.apiBaseUrl,
+    tokenProvider: () => auth.token,
+  );
+
+  runApp(
+    RustPocketApp(
+      settings: settings,
+      auth: auth,
+      projects: projects,
+      api: api,
+    ),
+  );
+}
+
+class RustPocketApp extends StatelessWidget {
+  const RustPocketApp({
+    super.key,
+    required this.settings,
+    required this.auth,
+    required this.projects,
+    required this.api,
+  });
+
+  final AppSettings settings;
+  final AuthStore auth;
+  final ProjectStore projects;
+  final ApiClient api;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: settings,
+      builder: (context, _) {
+        return MaterialApp(
+          title: 'RustPocket',
+          debugShowCheckedModeBanner: false,
+          theme: buildLightTheme(),
+          darkTheme: buildDarkTheme(),
+          themeMode: settings.themeMode,
+          home: AnimatedBuilder(
+            animation: auth,
+            builder: (context, _) {
+              if (!auth.isAuthenticated) {
+                return LoginScreen(api: api, auth: auth, settings: settings);
+              }
+              return HomeScreen(
+                api: api,
+                auth: auth,
+                projects: projects,
+                settings: settings,
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}

@@ -1,0 +1,10 @@
+# Backend
+server/target/
+server/*.db
+server/*.db-shm
+server/*.db-wal
+.env
+*.env.local
+
+# Rapports de compilation locaux
+*.log

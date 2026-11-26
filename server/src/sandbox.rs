@@ -9,7 +9,7 @@
 //!   cahier des charges asks for on the VPS.
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
     time::{Duration, Instant},
@@ -123,7 +123,7 @@ impl Sandbox {
         code: &str,
         mode: BuildMode,
     ) -> Result<CompileResult, SandboxError> {
-        let workspace = Workspace::new()?;
+        let workspace = Workspace::new(&self.config.work_dir)?;
         self.write_source(&workspace, code)?;
 
         let started = Instant::now();
@@ -144,7 +144,7 @@ impl Sandbox {
     }
 
     pub async fn run(&self, code: &str) -> Result<RunResult, SandboxError> {
-        let workspace = Workspace::new()?;
+        let workspace = Workspace::new(&self.config.work_dir)?;
         self.write_source(&workspace, code)?;
 
         let compile = self
@@ -258,7 +258,8 @@ impl Sandbox {
                     );
                 }
                 let mut c = self.docker_command(512, false);
-                c.args(["--user", "65534:65534", "-w", "/work"]);
+                c.args(["--user", "65534:65534"]);
+                self.mount_workspace(&mut c, workspace);
                 c.arg(&self.config.sandbox_image);
                 c.arg("rustc");
                 c
@@ -326,7 +327,8 @@ impl Sandbox {
             }
             SandboxMode::Docker => {
                 let mut c = self.docker_command(256, false);
-                c.args(["--user", "65534:65534", "-w", "/work"]);
+                c.args(["--user", "65534:65534"]);
+                self.mount_workspace(&mut c, workspace);
                 c.arg(&self.config.sandbox_image);
                 c.arg(format!("./{}", self.output_binary_name()));
                 c
@@ -347,6 +349,26 @@ impl Sandbox {
             limits,
         )
         .await
+    }
+
+    /// Exposes the workspace inside the container at `/work` and returns the
+    /// working directory to use there.
+    ///
+    /// A named volume is used when `RUSTPOCKET_WORK_VOLUME` is set: a bind mount
+    /// path is resolved by the Docker daemon on the host, so it is meaningless
+    /// when the server runs in a container as well.
+    fn mount_workspace(&self, cmd: &mut Command, workspace: &Workspace) {
+        let workdir = match &self.config.work_volume {
+            Some(volume) => {
+                cmd.args(["--volume", &format!("{volume}:/work")]);
+                format!("/work/{}", workspace.name())
+            }
+            None => {
+                cmd.args(["--volume", &format!("{}:/work", workspace.path.display())]);
+                "/work".to_string()
+            }
+        };
+        cmd.args(["--workdir", &workdir]);
     }
 
     /// Docker options common to every execution. The image name and the
@@ -389,10 +411,18 @@ struct Workspace {
 }
 
 impl Workspace {
-    fn new() -> Result<Self, SandboxError> {
-        let path = std::env::temp_dir().join(format!("rustpocket-{}", uuid::Uuid::new_v4()));
+    fn new(root: &Path) -> Result<Self, SandboxError> {
+        let path = root.join(format!("rustpocket-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&path).map_err(|e| SandboxError::Workspace(e.to_string()))?;
         Ok(Self { path })
+    }
+
+    /// Directory name, used to address the workspace inside a shared volume.
+    fn name(&self) -> String {
+        self.path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "work".to_string())
     }
 }
 

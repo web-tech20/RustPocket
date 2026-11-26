@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:highlight/languages/rust.dart';
 
@@ -286,11 +286,6 @@ class _EditorScreenState extends State<EditorScreen> {
                         color: theme.colorScheme.onSurface,
                       ),
                       cursorColor: RustColors.orange,
-                      textSelectionTheme: TextSelectionThemeData(
-                        cursorColor: RustColors.orange,
-                        selectionColor: RustColors.orange.withValues(alpha: 0.3),
-                        selectionHandleColor: RustColors.orange,
-                      ),
                       gutterStyle: GutterStyle(
                         width: 48,
                         margin: 8,

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 class RustLogo extends StatelessWidget {
   const RustLogo({super.key, this.size = 96});

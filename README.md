@@ -46,9 +46,54 @@ quotas et exécution isolée.
 └── .github/workflows/   CI (fmt, clippy, tests, analyze)
 ```
 
+## Dépendances
+
+SDK Flutter épinglé à **3.50.1** (Dart 3.14.0) : c'est la version utilisée en
+local **et** dans la CI (`.github/workflows/ci.yml`). Le SDK et les dépendances
+se mettent à jour ensemble, puis la version épinglée dans la CI et dans ce
+tableau est alignée.
+
+Contraintes déclarées dans `app/pubspec.yaml` et `server/Cargo.toml`, versions
+résolues dans `app/pubspec.lock` et `server/Cargo.lock`. Le serveur utilise Rust
+stable (`edition 2024`) et la CI le laisse en `stable` via
+`dtolnay/rust-toolchain`, sans épinglage.
+
+| Projet | Dépendance | Contrainte | Résolue | Rôle |
+| --- | --- | --- | --- | --- |
+| `app` | `cupertino_icons` | `^2.0.0` | `2.0.0` | Icônes de style iOS |
+| `app` | `http` | `^1.6.0` | `1.6.0` | Client HTTP vers l'API |
+| `app` | `shared_preferences` | `^2.5.6` | `2.5.6` | Persistance locale (projets, session, réglages) |
+| `app` | `flutter_code_editor` | `^0.3.5` | `0.3.5` | Éditeur avec numéros de ligne et coloration |
+| `app` | `highlight` | `^0.7.0` | `0.7.0` | Coloration syntaxique Rust |
+| `app` | `material_ui` | `^1.11.1` | `1.11.1` | Widgets Material ; remplace `package:flutter/material.dart`, déprécié à partir de Flutter 3.47 |
+| `app` | `flutter_lints` (dev) | `^6.0.0` | `6.0.0` | Règles d'analyse statique |
+| `serveur` | `anyhow` | `1.0.105` | `1.0.105` | Erreurs applicatives |
+| `serveur` | `argon2` | `0.6.0` | `0.6.0` | Hachage des mots de passe |
+| `serveur` | `axum` | `0.8.9` | `0.8.9` | Serveur HTTP et routage |
+| `serveur` | `jsonwebtoken` | `12.0.0` | `12.0.0` | Émission et vérification des JWT (`rust_crypto`) |
+| `serveur` | `libc` | `0.2.191` | `0.2.191` | Limites mémoire/CPU et gestion des processus du sandbox |
+| `serveur` | `rusqlite` | `0.43.0` | `0.43.0` | SQLite embarquée (comptes, quotas), feature `bundled` |
+| `serveur` | `serde` | `1.0.229` | `1.0.229` | Sérialisation des modèles |
+| `serveur` | `serde_json` | `1.0.154` | `1.0.154` | Corps JSON de l'API et diagnostics `rustc` |
+| `serveur` | `thiserror` | `2.0.21` | `2.0.21` | Types d'erreurs internes |
+| `serveur` | `tokio` | `1.54.1` | `1.54.1` | Runtime asynchrone (features `full`) |
+| `serveur` | `tower-http` | `0.7.1` | `0.7.1` | CORS et traces HTTP |
+| `serveur` | `tracing` | `0.1.44` | `0.1.44` | Journalisation structurée |
+| `serveur` | `tracing-subscriber` | `0.3.23` | `0.3.23` | Sortie des logs, filtre `RUST_LOG` |
+| `serveur` | `uuid` | `1.29.3` | `1.29.3` | Identifiants de requête et de workspace jetable |
+
+Les dépendances directes des deux projets sont toutes à leur dernière version.
+Il reste deux paquets transitifs Flutter plus anciens que leur dernière version,
+bloqués en amont : `equatable` (≤ 2.x, contrainte de `flutter_code_editor`) et
+`material_color_utilities` (fourni par le SDK Flutter).
+
+Mise à jour : `flutter upgrade`, puis `flutter pub upgrade --major-versions`
+dans `app/`, puis `flutter analyze` et `flutter test` avant de reporter la
+nouvelle version dans la CI.
+
 ## Démarrage
 
-Prérequis : Rust stable avec `rustfmt`, Flutter 3.x, et Docker pour le mode
+Prérequis : Rust stable avec `rustfmt`, Flutter 3.50.1 (version épinglée dans la CI), et Docker pour le mode
 d'exécution isolé en production.
 
 ### 1. Serveur
@@ -171,6 +216,34 @@ RUSTPOCKET_JWT_SECRET=un-secret-long docker compose up --build
 Le serveur monte `/var/run/docker.sock` pour lancer les conteneurs : il faut en
 être conscient sur une machine partagée. En usage personnel, c'est le compromis
 retenu par le cahier des charges.
+
+Chaque exécution monte son dossier de travail dans le conteneur. Lancé sur
+l'hôte, le serveur utilise un *bind mount* de `/tmp` ; lancé dans un conteneur
+(cas de `docker compose`), il écrit dans le volume nommé `rustpocket-work`
+(`RUSTPOCKET_WORK_DIR=/work`, `RUSTPOCKET_WORK_VOLUME=rustpocket-work`), sinon le
+démon Docker chercherait le chemin dans son propre système de fichiers.
+
+### Vérifier que le sandbox est réellement actif
+
+```bash
+# 1. le serveur doit annoncer le mode docker dans ses logs
+#    sandbox=Docker
+docker compose logs server | head
+
+# 2. un run normal doit créer puis détruire un conteneur
+curl -s -X POST localhost:8080/run -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"code":"fn main(){println!(\"ok\");}"}'
+# {"success":true,...,"stdout":"ok\n"}
+
+# 3. aucune fuite réseau : ce programme doit échouer
+docker run --rm --network none rustpocket-sandbox:latest \
+  sh -c 'getent hosts example.com || echo RESEAU-COUPE'
+# RESEAU-COUPE
+
+# 4. aucun conteneur ne doit rester derrière un appel
+docker ps --filter ancestor=rustpocket-sandbox:latest
+```
 
 ## Tests et vérifications
 

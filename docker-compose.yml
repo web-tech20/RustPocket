@@ -8,14 +8,23 @@ services:
       RUSTPOCKET_SANDBOX: docker
       RUSTPOCKET_SANDBOX_IMAGE: rustpocket-sandbox:latest
       RUSTPOCKET_DATABASE: /data/rustpocket.db
+      RUSTPOCKET_WORK_DIR: /work
+      # Le serveur tourne dans un conteneur : le dossier de travail doit être un
+      # volume nommé pour être visible par le démon Docker.
+      RUSTPOCKET_WORK_VOLUME: rustpocket-work
       RUSTPOCKET_RUN_TIMEOUT: 10
       RUSTPOCKET_RUNS_PER_MINUTE: 20
       RUSTPOCKET_RUNS_PER_DAY: 300
     volumes:
       - rustpocket-data:/data
+      # Dossier de travail partagé avec les conteneurs de sandbox.
+      - rustpocket-work:/work
       # Permet au serveur de lancer les conteneurs d'exécution.
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
 volumes:
   rustpocket-data:
+  rustpocket-work:
+    # Nom fixe : les conteneurs de sandbox montent ce volume par son nom.
+    name: rustpocket-work

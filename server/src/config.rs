@@ -19,6 +19,13 @@ pub struct Config {
     pub token_ttl_secs: i64,
     pub sandbox_mode: SandboxMode,
     pub sandbox_image: String,
+    /// Root directory for the per-run workspaces. When the server runs in a
+    /// container this must be a path shared with the Docker daemon.
+    pub work_dir: PathBuf,
+    /// Named Docker volume holding `work_dir`. Required when the server itself
+    /// runs in a container, because the daemon resolves bind-mount paths on the
+    /// host, not inside the server container.
+    pub work_volume: Option<String>,
     pub max_code_bytes: usize,
     pub max_output_bytes: usize,
     pub compile_timeout: Duration,
@@ -64,6 +71,13 @@ impl Config {
             sandbox_mode,
             sandbox_image: env::var("RUSTPOCKET_SANDBOX_IMAGE")
                 .unwrap_or_else(|_| "rustpocket-sandbox:latest".into()),
+            work_dir: env::var("RUSTPOCKET_WORK_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| env::temp_dir()),
+            work_volume: env::var("RUSTPOCKET_WORK_VOLUME")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
             max_code_bytes: env_usize("RUSTPOCKET_MAX_CODE_BYTES", 64 * 1024),
             max_output_bytes: env_usize("RUSTPOCKET_MAX_OUTPUT_BYTES", 64 * 1024),
             compile_timeout: Duration::from_secs(env_secs("RUSTPOCKET_COMPILE_TIMEOUT", 30)),

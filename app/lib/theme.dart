@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 
 /// Colours from section 8.1 of the specification: sober black and white with

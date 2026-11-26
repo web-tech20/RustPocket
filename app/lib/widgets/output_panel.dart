@@ -7,6 +7,7 @@ class OutputPanel extends StatelessWidget {
   const OutputPanel({
     super.key,
     required this.busy,
+    this.busyLabel = 'Exécution en cours…',
     required this.message,
     required this.compile,
     required this.run,
@@ -15,6 +16,7 @@ class OutputPanel extends StatelessWidget {
   });
 
   final bool busy;
+  final String busyLabel;
   final String? message;
   final CompileResult? compile;
   final RunResult? run;
@@ -149,7 +151,7 @@ class OutputPanel extends StatelessWidget {
     CompileResult? compileResult,
   ) {
     if (busy) {
-      return (Icons.sync, RustColors.orange, 'Exécution en cours…');
+      return (Icons.sync, RustColors.orange, busyLabel);
     }
     if (message != null) {
       return (Icons.error_outline, theme.colorScheme.error, message!);

@@ -52,12 +52,31 @@ class AppSettings extends ChangeNotifier {
     notifyListeners();
   }
 
-  void setApiBaseUrl(String url) {
+  /// Applies [url] when it is a usable address. Returns false when the value
+  /// was rejected, so the caller can show [validateBaseUrl] to the user.
+  bool setApiBaseUrl(String url) {
+    if (validateBaseUrl(url) != null) return false;
     final normalized = normalizeBaseUrl(url);
-    if (normalized.isEmpty || normalized == _apiBaseUrl) return;
+    if (normalized == _apiBaseUrl) return true;
     _apiBaseUrl = normalized;
     _prefs.setString(_serverKey, normalized);
     notifyListeners();
+    return true;
+  }
+
+  /// Null when [url] can be used as an API base, otherwise a French message.
+  static String? validateBaseUrl(String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) {
+      return 'Saisissez l’adresse du serveur.';
+    }
+    final uri = Uri.tryParse(normalizeBaseUrl(trimmed));
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty) {
+      return 'Adresse du serveur invalide. Exemple : http://192.168.1.20:8080';
+    }
+    return null;
   }
 
   /// Emulator-friendly default; set `RUSTPOCKET_API_URL` at build time or
@@ -74,10 +93,15 @@ class AppSettings extends ChangeNotifier {
 
   static String normalizeBaseUrl(String url) {
     var value = url.trim();
+    // Detect the scheme before trimming slashes: `http://` would otherwise
+    // shrink to `http:` and look like a host without a scheme.
+    final hasScheme = value.contains('://');
     while (value.endsWith('/')) {
       value = value.substring(0, value.length - 1);
     }
-    if (value.isNotEmpty && !value.startsWith('http')) {
+    // Only add a scheme when the user did not provide one; otherwise a
+    // non-HTTP scheme would silently become `http://ftp://…`.
+    if (value.isNotEmpty && !hasScheme) {
       value = 'http://$value';
     }
     return value;

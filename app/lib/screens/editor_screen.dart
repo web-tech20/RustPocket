@@ -11,6 +11,8 @@ import '../storage/project_store.dart';
 import '../theme.dart';
 import '../widgets/output_panel.dart';
 
+enum _BusyAction { run, check, format }
+
 class EditorScreen extends StatefulWidget {
   const EditorScreen({
     super.key,
@@ -35,7 +37,7 @@ class _EditorScreenState extends State<EditorScreen> {
   final FocusNode _focusNode = FocusNode();
 
   Timer? _saveTimer;
-  bool _busy = false;
+  _BusyAction? _busy;
   bool _panelOpen = false;
   String? _message;
   CompileResult? _checkResult;
@@ -47,6 +49,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _project = widget.project;
     _controller = CodeController(text: _project.code, language: rust)
       ..addListener(_onCodeChanged);
+    _focusNode.addListener(_onFocusChanged);
   }
 
   @override
@@ -54,6 +57,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _saveTimer?.cancel();
     _saveNow();
     _controller.removeListener(_onCodeChanged);
+    _focusNode.removeListener(_onFocusChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -65,6 +69,16 @@ class _EditorScreenState extends State<EditorScreen> {
     _saveTimer = Timer(const Duration(milliseconds: 600), _saveNow);
   }
 
+  void _onFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  String get _busyLabel => switch (_busy) {
+        _BusyAction.check => 'Vérification en cours…',
+        _BusyAction.format => 'Formatage en cours…',
+        _ => 'Exécution en cours…',
+      };
+
   void _saveNow() {
     _saveTimer?.cancel();
     final code = _controller.fullText;
@@ -74,11 +88,11 @@ class _EditorScreenState extends State<EditorScreen> {
   }
 
   Future<void> _run() async {
-    if (_busy) return;
+    if (_busy != null) return;
     _saveNow();
     FocusScope.of(context).unfocus();
     setState(() {
-      _busy = true;
+      _busy = _BusyAction.run;
       _panelOpen = true;
       _message = null;
       _runResult = null;
@@ -90,23 +104,23 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) return;
       setState(() {
         _runResult = result;
-        _busy = false;
+        _busy = null;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _message = e.message;
-        _busy = false;
+        _busy = null;
       });
     }
   }
 
   Future<void> _check() async {
-    if (_busy) return;
+    if (_busy != null) return;
     _saveNow();
     FocusScope.of(context).unfocus();
     setState(() {
-      _busy = true;
+      _busy = _BusyAction.check;
       _panelOpen = true;
       _message = null;
       _runResult = null;
@@ -118,22 +132,22 @@ class _EditorScreenState extends State<EditorScreen> {
       if (!mounted) return;
       setState(() {
         _checkResult = result;
-        _busy = false;
+        _busy = null;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _message = e.message;
-        _busy = false;
+        _busy = null;
       });
     }
   }
 
   Future<void> _format() async {
-    if (_busy) return;
+    if (_busy != null) return;
     final offset = _controller.selection.baseOffset;
     setState(() {
-      _busy = true;
+      _busy = _BusyAction.format;
       _message = null;
     });
 
@@ -145,14 +159,14 @@ class _EditorScreenState extends State<EditorScreen> {
         offset: offset < 0 ? 0 : offset.clamp(0, formatted.length),
       );
       _saveNow();
-      setState(() => _busy = false);
+      setState(() => _busy = null);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Code formaté avec rustfmt')),
       );
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
-        _busy = false;
+        _busy = null;
         _message = e.message;
         _panelOpen = true;
       });
@@ -221,6 +235,8 @@ class _EditorScreenState extends State<EditorScreen> {
             ? RustColors.black
             : RustColors.white;
         final fontSize = widget.settings.editorFontSize;
+        final panelMaxHeight =
+            (MediaQuery.sizeOf(context).height * 0.42).clamp(140.0, 320.0);
 
         return Scaffold(
           resizeToAvoidBottomInset: true,
@@ -251,6 +267,12 @@ class _EditorScreenState extends State<EditorScreen> {
               ),
             ),
             actions: [
+              if (_focusNode.hasFocus)
+                IconButton(
+                  tooltip: 'Masquer le clavier',
+                  onPressed: () => _focusNode.unfocus(),
+                  icon: const Icon(Icons.keyboard_hide_outlined),
+                ),
               IconButton(
                 tooltip: 'Enregistrer',
                 onPressed: () {
@@ -305,9 +327,10 @@ class _EditorScreenState extends State<EditorScreen> {
                   Divider(height: 1, color: theme.colorScheme.outline),
                   Flexible(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxHeight: 300),
+                      constraints: BoxConstraints(maxHeight: panelMaxHeight),
                       child: OutputPanel(
-                        busy: _busy,
+                        busy: _busy != null,
+                        busyLabel: _busyLabel,
                         message: _message,
                         compile: _checkResult,
                         run: _runResult,
@@ -337,11 +360,11 @@ class _EditorScreenState extends State<EditorScreen> {
         children: [
           Expanded(
             child: FilledButton.icon(
-              onPressed: _busy ? null : _run,
+              onPressed: _busy != null ? null : _run,
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(46),
               ),
-              icon: _busy
+              icon: _busy == _BusyAction.run
                   ? const SizedBox(
                       width: 18,
                       height: 18,
@@ -351,20 +374,22 @@ class _EditorScreenState extends State<EditorScreen> {
                       ),
                     )
                   : const Icon(Icons.play_arrow_rounded),
-              label: Text(_busy ? 'Exécution…' : 'Run'),
+              label: Text(_busy == _BusyAction.run ? 'Exécution…' : 'Run'),
             ),
           ),
           const SizedBox(width: 6),
           _ToolAction(
             icon: Icons.format_align_left,
             label: 'Format',
-            onPressed: _busy ? null : _format,
+            busy: _busy == _BusyAction.format,
+            onPressed: _busy != null ? null : _format,
           ),
           const SizedBox(width: 2),
           _ToolAction(
             icon: Icons.fact_check_outlined,
             label: 'Check',
-            onPressed: _busy ? null : _check,
+            busy: _busy == _BusyAction.check,
+            onPressed: _busy != null ? null : _check,
           ),
           IconButton(
             tooltip: _panelOpen ? 'Masquer la sortie' : 'Afficher la sortie',
@@ -386,11 +411,13 @@ class _ToolAction extends StatelessWidget {
     required this.icon,
     required this.label,
     required this.onPressed,
+    this.busy = false,
   });
 
   final IconData icon;
   final String label;
   final VoidCallback? onPressed;
+  final bool busy;
 
   @override
   Widget build(BuildContext context) {
@@ -410,7 +437,14 @@ class _ToolAction extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 20),
+            if (busy)
+              const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              Icon(icon, size: 20),
             const SizedBox(height: 2),
             Text(label, style: const TextStyle(fontSize: 11)),
           ],

@@ -16,9 +16,14 @@ Future<void> main() async {
   final settings = AppSettings.load(prefs);
   final auth = AuthStore.load(prefs);
   final projects = ProjectStore(prefs);
+  final navigatorKey = GlobalKey<NavigatorState>();
   final api = ApiClient(
     baseUrlProvider: () => settings.apiBaseUrl,
     tokenProvider: () => auth.token,
+    onUnauthorized: () {
+      navigatorKey.currentState?.popUntil((route) => route.isFirst);
+      auth.signOut();
+    },
   );
 
   runApp(
@@ -27,6 +32,7 @@ Future<void> main() async {
       auth: auth,
       projects: projects,
       api: api,
+      navigatorKey: navigatorKey,
     ),
   );
 }
@@ -38,12 +44,14 @@ class RustPocketApp extends StatelessWidget {
     required this.auth,
     required this.projects,
     required this.api,
+    required this.navigatorKey,
   });
 
   final AppSettings settings;
   final AuthStore auth;
   final ProjectStore projects;
   final ApiClient api;
+  final GlobalKey<NavigatorState> navigatorKey;
 
   @override
   Widget build(BuildContext context) {
@@ -52,6 +60,7 @@ class RustPocketApp extends StatelessWidget {
       builder: (context, _) {
         return MaterialApp(
           title: 'RustPocket',
+          navigatorKey: navigatorKey,
           debugShowCheckedModeBanner: false,
           theme: buildLightTheme(),
           darkTheme: buildDarkTheme(),

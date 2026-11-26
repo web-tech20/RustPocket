@@ -32,7 +32,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _server = TextEditingController(text: widget.settings.apiBaseUrl);
-    _refreshAccount();
+    if (!widget.auth.isOffline) _refreshAccount();
   }
 
   @override
@@ -42,6 +42,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _refreshAccount() async {
+    if (widget.auth.isOffline) return;
     setState(() {
       _loadingAccount = true;
       _accountError = null;
@@ -57,7 +58,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   void _saveServer() {
-    widget.settings.setApiBaseUrl(_server.text);
+    if (!widget.settings.setApiBaseUrl(_server.text)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppSettings.validateBaseUrl(_server.text) ??
+                'Adresse du serveur invalide.',
+          ),
+        ),
+      );
+      return;
+    }
     _server.text = widget.settings.apiBaseUrl;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -180,7 +191,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              widget.auth.email ?? '',
+                              widget.auth.isOffline
+                                  ? 'Mode local'
+                                  : (widget.auth.email ?? ''),
                               style: const TextStyle(
                                 fontWeight: FontWeight.w600,
                               ),
@@ -189,7 +202,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      if (_loadingAccount)
+                      if (widget.auth.isOffline)
+                        Text(
+                          'Aucune connexion au serveur. L’éditeur et vos '
+                          'projets locaux restent disponibles.',
+                          style: theme.textTheme.bodySmall,
+                        )
+                      else if (_loadingAccount)
                         const LinearProgressIndicator(minHeight: 2)
                       else if (_accountError != null)
                         Text(
@@ -210,12 +229,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           style: theme.textTheme.bodySmall,
                         ),
                       ],
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: _loadingAccount ? null : _refreshAccount,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Actualiser'),
-                      ),
+                      if (!widget.auth.isOffline) ...[
+                        const SizedBox(height: 8),
+                        TextButton.icon(
+                          onPressed: _loadingAccount ? null : _refreshAccount,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Actualiser'),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -231,7 +252,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   minimumSize: const Size.fromHeight(48),
                 ),
                 icon: const Icon(Icons.logout),
-                label: const Text('Se déconnecter'),
+                label: Text(
+                  widget.auth.isOffline
+                      ? 'Quitter le mode local'
+                      : 'Se déconnecter',
+                ),
               ),
               const SizedBox(height: 24),
               Center(

@@ -26,10 +26,15 @@ class ApiClient {
     required this.baseUrlProvider,
     required this.tokenProvider,
     http.Client? client,
+    this.onUnauthorized,
   }) : _client = client ?? http.Client();
 
   final String Function() baseUrlProvider;
   final String? Function() tokenProvider;
+
+  /// Called when the server rejects an authenticated request, so the app can
+  /// drop an expired session instead of leaving the user stuck.
+  final void Function()? onUnauthorized;
   final http.Client _client;
 
   Uri _uri(String path) {
@@ -70,27 +75,42 @@ class ApiClient {
   }
 
   Future<CompileResult> compile(String code) async {
+    _requireSession();
     final json = await _post('/compile', {'code': code});
     return CompileResult.fromJson(json as Map<String, dynamic>);
   }
 
   Future<CompileResult> check(String code) async {
+    _requireSession();
     final json = await _post('/check', {'code': code});
     return CompileResult.fromJson(json as Map<String, dynamic>);
   }
 
   Future<RunResult> run(String code) async {
+    _requireSession();
     final json = await _post('/run', {'code': code});
     return RunResult.fromJson(json as Map<String, dynamic>);
   }
 
   Future<String> format(String code) async {
+    _requireSession();
     final json = await _post(
       '/format',
       {'code': code},
       timeout: const Duration(seconds: 30),
     );
     return (json as Map<String, dynamic>)['code'] as String? ?? code;
+  }
+
+  /// Local mode has no token: fail immediately instead of waiting for the
+  /// network timeout of a server that would reject the request anyway.
+  void _requireSession() {
+    final token = tokenProvider();
+    if (token == null || token.isEmpty) {
+      throw ApiException(
+        'Mode local : connectez-vous pour compiler et exécuter du code.',
+      );
+    }
   }
 
   Future<dynamic> _get(String path) async {
@@ -148,6 +168,10 @@ class ApiClient {
         if (error is Map<String, dynamic>) {
           message = error['message'] as String?;
         }
+      }
+      if (response.statusCode == 401 &&
+          (tokenProvider()?.isNotEmpty ?? false)) {
+        onUnauthorized?.call();
       }
       throw ApiException(
         message ?? 'Erreur du serveur (${response.statusCode}).',

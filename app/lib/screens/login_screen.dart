@@ -57,12 +57,18 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = 'Le mot de passe doit contenir 8 caractères.');
       return;
     }
+    final serverError = AppSettings.validateBaseUrl(_server.text);
+    if (serverError != null) {
+      setState(() => _error = serverError);
+      return;
+    }
 
     setState(() {
       _busy = true;
       _error = null;
     });
     widget.settings.setApiBaseUrl(_server.text);
+    _server.text = widget.settings.apiBaseUrl;
 
     try {
       final session = _registering
@@ -215,6 +221,22 @@ class _LoginScreenState extends State<LoginScreen> {
                       _registering
                           ? 'Déjà un compte ? Se connecter'
                           : 'Pas encore de compte ? S’inscrire',
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  TextButton.icon(
+                    // Never disable this while a login is pending: the user
+                    // must be able to bypass a server that does not answer.
+                    onPressed: () => widget.auth.continueOffline(),
+                    icon: const Icon(Icons.cloud_off_outlined, size: 18),
+                    label: const Text('Continuer sans serveur'),
+                  ),
+                  Text(
+                    'Mode local : l’éditeur fonctionne, la compilation '
+                    'nécessite une connexion.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: RustColors.grey,
                     ),
                   ),
                 ],

@@ -59,10 +59,10 @@ class ProjectStore {
 
   List<Project> all() {
     final raw = _prefs.getString(_key);
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null || raw.isEmpty) return <Project>[];
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! List) return const [];
+      if (decoded is! List) return <Project>[];
       final projects = decoded
           .whereType<Map<String, dynamic>>()
           .map(Project.fromJson)
@@ -71,7 +71,7 @@ class ProjectStore {
       projects.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       return projects;
     } catch (_) {
-      return const [];
+      return <Project>[];
     }
   }
 

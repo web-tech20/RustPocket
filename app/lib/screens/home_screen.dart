@@ -189,16 +189,22 @@ class _HomeScreenState extends State<HomeScreen> {
               PopupMenuItem<String>(
                 enabled: false,
                 child: Text(
-                  widget.auth.email ?? '',
+                  widget.auth.isOffline
+                      ? 'Mode local (hors ligne)'
+                      : (widget.auth.email ?? ''),
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: RustColors.grey,
                   ),
                 ),
               ),
               const PopupMenuItem(value: 'settings', child: Text('Paramètres')),
-              const PopupMenuItem(
+              PopupMenuItem(
                 value: 'logout',
-                child: Text('Se déconnecter'),
+                child: Text(
+                  widget.auth.isOffline
+                      ? 'Quitter le mode local'
+                      : 'Se déconnecter',
+                ),
               ),
             ],
           ),

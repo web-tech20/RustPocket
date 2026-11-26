@@ -94,27 +94,29 @@ ThemeData _baseTheme(ColorScheme scheme, Brightness brightness) {
 }
 
 /// Syntax colours: keywords in orange, strings muted green, comments grey.
+/// The light palette uses darker variants so code stays readable on white.
 CodeThemeData buildCodeTheme(Brightness brightness) {
-  final base =
-      brightness == Brightness.dark ? RustColors.offWhite : RustColors.black;
+  final dark = brightness == Brightness.dark;
+  final base = dark ? RustColors.offWhite : RustColors.black;
+  final keyword = dark ? RustColors.orange : const Color(0xFFC2410C);
+  final builtIn = dark ? const Color(0xFFFFB07C) : const Color(0xFF7C3E00);
+  final title = dark ? const Color(0xFFFFD7B5) : const Color(0xFF6B3A00);
+  final string = dark ? const Color(0xFF9CCF9F) : const Color(0xFF2F7D32);
+  final comment = dark ? RustColors.grey : const Color(0xFF5F6368);
+  final number = dark ? const Color(0xFF8FC7F0) : const Color(0xFF1565C0);
+  final type = dark ? const Color(0xFFE6C07B) : const Color(0xFF7A5B00);
   return CodeThemeData(
     styles: {
       'root': TextStyle(color: base, backgroundColor: Colors.transparent),
-      'keyword': const TextStyle(
-        color: RustColors.orange,
-        fontWeight: FontWeight.w700,
-      ),
-      'built_in': const TextStyle(color: Color(0xFFFFB07C)),
-      'title': const TextStyle(color: Color(0xFFFFD7B5)),
-      'string': const TextStyle(color: Color(0xFF9CCF9F)),
-      'comment': const TextStyle(
-        color: RustColors.grey,
-        fontStyle: FontStyle.italic,
-      ),
-      'number': const TextStyle(color: Color(0xFF8FC7F0)),
-      'literal': const TextStyle(color: Color(0xFF8FC7F0)),
-      'type': const TextStyle(color: Color(0xFFE6C07B)),
-      'meta': const TextStyle(color: RustColors.grey),
+      'keyword': TextStyle(color: keyword, fontWeight: FontWeight.w700),
+      'built_in': TextStyle(color: builtIn),
+      'title': TextStyle(color: title),
+      'string': TextStyle(color: string),
+      'comment': TextStyle(color: comment, fontStyle: FontStyle.italic),
+      'number': TextStyle(color: number),
+      'literal': TextStyle(color: number),
+      'type': TextStyle(color: type),
+      'meta': TextStyle(color: comment),
       'operator': TextStyle(color: base),
     },
   );

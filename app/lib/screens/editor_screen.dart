@@ -9,6 +9,7 @@ import 'package:highlight/languages/rust.dart';
 import '../api/api_client.dart';
 import '../api/models.dart';
 import '../storage/app_settings.dart';
+import '../storage/external_file_service.dart';
 import '../storage/project_store.dart';
 import '../theme.dart';
 import '../widgets/output_panel.dart';
@@ -188,6 +189,130 @@ class _EditorScreenState extends State<EditorScreen> {
     _focusNode.requestFocus();
   }
 
+  void _insertSnippet(String left, [String right = '']) {
+    final text = _controller.fullText;
+    final sel = _controller.selection;
+    final start = sel.start < 0 ? text.length : sel.start.clamp(0, text.length);
+    final end = sel.end < 0 ? start : sel.end.clamp(0, text.length);
+    final selected = text.substring(start, end);
+    final replacement = '$left$selected$right';
+    _controller.fullText = text.replaceRange(start, end, replacement);
+    final cursor = right.isNotEmpty && selected.isEmpty
+        ? start + left.length
+        : start + replacement.length;
+    _controller.selection = TextSelection.collapsed(offset: cursor);
+    _focusNode.requestFocus();
+  }
+
+  void _indent() {
+    final text = _controller.fullText;
+    final sel = _controller.selection;
+    final start = sel.start < 0 ? text.length : sel.start.clamp(0, text.length);
+    final end = sel.end < 0 ? start : sel.end.clamp(0, text.length);
+    if (start == end) {
+      _insertSnippet('    ');
+      return;
+    }
+    final lineStart = text.lastIndexOf('\n', start > 0 ? start - 1 : 0) + 1;
+    final selectedBlock = text.substring(lineStart, end);
+    final lines = selectedBlock.split('\n');
+    final indented = lines.map((l) => '    $l').join('\n');
+    _controller.fullText = text.replaceRange(lineStart, end, indented);
+    _controller.selection = TextSelection(
+      baseOffset: start + 4,
+      extentOffset: end + (lines.length * 4),
+    );
+    _focusNode.requestFocus();
+  }
+
+  void _unindent() {
+    final text = _controller.fullText;
+    final sel = _controller.selection;
+    final start = sel.start < 0 ? text.length : sel.start.clamp(0, text.length);
+    final end = sel.end < 0 ? start : sel.end.clamp(0, text.length);
+    final lineStart = start == 0
+        ? 0
+        : text.lastIndexOf('\n', start - 1) + 1;
+    final lineEndIdx = text.indexOf('\n', end);
+    final lineEnd = lineEndIdx < 0 ? text.length : lineEndIdx;
+    final block = text.substring(lineStart, lineEnd);
+    final lines = block.split('\n');
+    var removedFirst = 0;
+    var removedTotal = 0;
+    final updatedLines = <String>[];
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      var remove = 0;
+      while (remove < 4 && remove < line.length && line[remove] == ' ') {
+        remove++;
+      }
+      if (remove == 0 && line.startsWith('\t')) {
+        remove = 1;
+      }
+      if (i == 0) removedFirst = remove;
+      removedTotal += remove;
+      updatedLines.add(line.substring(remove));
+    }
+    if (removedTotal == 0) {
+      _focusNode.requestFocus();
+      return;
+    }
+    final replacement = updatedLines.join('\n');
+    _controller.fullText = text.replaceRange(lineStart, lineEnd, replacement);
+    _controller.selection = TextSelection(
+      baseOffset: (start - removedFirst).clamp(lineStart, _controller.fullText.length),
+      extentOffset: (end - removedTotal).clamp(lineStart, _controller.fullText.length),
+    );
+    _focusNode.requestFocus();
+  }
+
+  Future<void> _openExternalFile() async {
+    try {
+      final file = await ExternalFileService.openFile();
+      if (file == null || !mounted) return;
+      _saveNow();
+      final created = await widget.projects.create(
+        name: file.name,
+        code: file.content,
+      );
+      if (!mounted) return;
+      setState(() {
+        _project = created;
+        _controller.fullText = created.code;
+        _checkResult = null;
+        _runResult = null;
+        _message = null;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Fichier ouvert : ${file.name}')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Impossible d’ouvrir le fichier : $e')),
+      );
+    }
+  }
+
+  Future<void> _saveFileAs() async {
+    try {
+      _saveNow();
+      final savedName = await ExternalFileService.saveFileAs(
+        suggestedName: _project.name,
+        content: _controller.fullText,
+      );
+      if (savedName == null || !mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Enregistré sous : $savedName')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Impossible d’enregistrer : $e')),
+      );
+    }
+  }
+
   Future<void> _rename() async {
     final controller = TextEditingController(text: _project.name);
     final name = await showDialog<String>(
@@ -285,6 +410,31 @@ class _EditorScreenState extends State<EditorScreen> {
                 },
                 icon: const Icon(Icons.save_outlined),
               ),
+              PopupMenuButton<String>(
+                tooltip: 'Fichier',
+                onSelected: (value) {
+                  if (value == 'open') _openExternalFile();
+                  if (value == 'save_as') _saveFileAs();
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'open',
+                    child: ListTile(
+                      leading: Icon(Icons.folder_open_outlined),
+                      title: Text('Ouvrir un fichier…'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'save_as',
+                    child: ListTile(
+                      leading: Icon(Icons.save_as_outlined),
+                      title: Text('Enregistrer sous…'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
           body: SafeArea(
@@ -354,12 +504,43 @@ class _EditorScreenState extends State<EditorScreen> {
                     ),
                   ),
                 ],
+                _quickKeysBar(theme),
                 _toolbar(theme),
               ],
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _quickKeysBar(ThemeData theme) {
+    return Container(
+      height: 40,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        border: Border(top: BorderSide(color: theme.colorScheme.outline)),
+      ),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        children: [
+          _QuickKey(label: '⇥ Tab', onTap: _indent),
+          _QuickKey(label: '⇤', onTap: _unindent),
+          _QuickKey(label: '{ }', onTap: () => _insertSnippet('{', '}')),
+          _QuickKey(label: '( )', onTap: () => _insertSnippet('(', ')')),
+          _QuickKey(label: '[ ]', onTap: () => _insertSnippet('[', ']')),
+          _QuickKey(label: ';', onTap: () => _insertSnippet(';')),
+          _QuickKey(label: '->', onTap: () => _insertSnippet(' -> ')),
+          _QuickKey(label: '::', onTap: () => _insertSnippet('::')),
+          _QuickKey(label: '"', onTap: () => _insertSnippet('"', '"')),
+          _QuickKey(label: '&', onTap: () => _insertSnippet('&')),
+          _QuickKey(label: '//', onTap: () => _insertSnippet('// ')),
+          _QuickKey(label: '< >', onTap: () => _insertSnippet('<', '>')),
+          _QuickKey(label: '_', onTap: () => _insertSnippet('_')),
+          _QuickKey(label: '!', onTap: () => _insertSnippet('!')),
+        ],
+      ),
     );
   }
 
@@ -462,6 +643,45 @@ class _ToolAction extends StatelessWidget {
             const SizedBox(height: 2),
             Text(label, style: const TextStyle(fontSize: 11)),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickKey extends StatelessWidget {
+  const _QuickKey({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest.withValues(
+          alpha: theme.brightness == Brightness.dark ? 0.5 : 0.7,
+        ),
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            child: Center(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontFamily: codeFontFamily,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

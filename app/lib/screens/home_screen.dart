@@ -3,6 +3,7 @@ import 'package:material_ui/material_ui.dart';
 import '../api/api_client.dart';
 import '../storage/app_settings.dart';
 import '../storage/auth_store.dart';
+import '../storage/external_file_service.dart';
 import '../storage/project_store.dart';
 import '../theme.dart';
 import '../widgets/rust_logo.dart';
@@ -139,6 +140,25 @@ class _HomeScreenState extends State<HomeScreen> {
     return result;
   }
 
+  Future<void> _openExternalFile() async {
+    try {
+      final file = await ExternalFileService.openFile();
+      if (file == null || !mounted) return;
+      final project = await widget.projects.create(
+        name: file.name,
+        code: file.content,
+      );
+      if (!mounted) return;
+      setState(_reload);
+      await _open(project);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Impossible d’ouvrir le fichier : $e')),
+      );
+    }
+  }
+
   Future<void> _openSettings() async {
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -168,6 +188,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Ouvrir un fichier externe',
+            onPressed: _openExternalFile,
+            icon: const Icon(Icons.folder_open_outlined),
+          ),
           IconButton(
             tooltip: 'Paramètres',
             onPressed: _openSettings,

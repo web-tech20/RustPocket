@@ -1,3 +1,5 @@
+import 'package:flutter/cupertino.dart' show DefaultCupertinoLocalizations;
+import 'package:flutter/material.dart' show DefaultMaterialLocalizations;
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -55,6 +57,11 @@ class RustPocketApp extends StatelessWidget {
           title: 'RustPocket',
           navigatorKey: navigatorKey,
           debugShowCheckedModeBanner: false,
+          localizationsDelegates: const [
+            DefaultMaterialLocalizations.delegate,
+            DefaultCupertinoLocalizations.delegate,
+            DefaultWidgetsLocalizations.delegate,
+          ],
           theme: buildLightTheme(),
           darkTheme: buildDarkTheme(),
           themeMode: settings.themeMode,

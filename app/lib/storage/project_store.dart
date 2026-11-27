@@ -82,12 +82,12 @@ class ProjectStore {
     return null;
   }
 
-  Future<Project> create({String? name}) async {
+  Future<Project> create({String? name, String? code}) async {
     final now = DateTime.now();
     final project = Project(
       id: now.microsecondsSinceEpoch.toString(),
       name: _cleanName(name) ?? _uniqueName(),
-      code: defaultProjectCode,
+      code: code ?? defaultProjectCode,
       updatedAt: now,
     );
     await save(project);

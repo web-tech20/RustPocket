@@ -1,5 +1,7 @@
 import 'package:flutter/cupertino.dart' show DefaultCupertinoLocalizations;
-import 'package:flutter/material.dart' show DefaultMaterialLocalizations;
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter_material
+    show DefaultMaterialLocalizations;
 import 'package:material_ui/material_ui.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -58,6 +60,7 @@ class RustPocketApp extends StatelessWidget {
           navigatorKey: navigatorKey,
           debugShowCheckedModeBanner: false,
           localizationsDelegates: const [
+            flutter_material.DefaultMaterialLocalizations.delegate,
             DefaultMaterialLocalizations.delegate,
             DefaultCupertinoLocalizations.delegate,
             DefaultWidgetsLocalizations.delegate,

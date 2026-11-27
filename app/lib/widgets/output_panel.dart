@@ -66,7 +66,17 @@ class OutputPanel extends StatelessWidget {
                             ? null
                             : () => onLineTap(diagnostic.line!),
                       ),
-                    if (diagnostics.isEmpty && compileResult != null)
+                    if (diagnostics.isEmpty &&
+                        compileResult != null &&
+                        !compileResult.success &&
+                        compileResult.rawOutput.trim().isNotEmpty)
+                      _outputSection(
+                        theme,
+                        title: 'Détails',
+                        body: compileResult.rawOutput,
+                        error: true,
+                      )
+                    else if (diagnostics.isEmpty && compileResult != null)
                       _quietLine(theme, 'Aucun diagnostic.'),
                     if (run != null) ...[
                       if (diagnostics.isNotEmpty || compileResult != null)

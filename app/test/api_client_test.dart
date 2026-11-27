@@ -1,51 +1,45 @@
-import 'dart:convert';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
-import 'package:rustpocket/api/api_client.dart';
-
-ApiClient _client({
-  required String? token,
-  required void Function() onUnauthorized,
-}) {
-  return ApiClient(
-    baseUrlProvider: () => 'http://localhost:8080',
-    tokenProvider: () => token,
-    onUnauthorized: onUnauthorized,
-    client: MockClient(
-      (_) async => http.Response(
-        jsonEncode({
-          'error': {'message': 'session expirée'},
-        }),
-        401,
-        headers: {'content-type': 'application/json'},
-      ),
-    ),
-  );
-}
+import 'package:rustpocket/storage/auth_store.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  test('un 401 avec un jeton déclenche la déconnexion', () async {
-    var signOuts = 0;
-    final api = _client(token: 'jeton', onUnauthorized: () => signOuts++);
+  test('AuthStore crée un compte local et connecte l’utilisateur', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final auth = AuthStore.load(prefs);
 
-    await expectLater(
-      api.me(),
-      throwsA(
-        isA<ApiException>()
-            .having((e) => e.message, 'message', 'session expirée')
-            .having((e) => e.isUnauthorized, 'isUnauthorized', isTrue),
-      ),
+    expect(auth.isAuthenticated, isFalse);
+    expect(auth.hasLocalAccounts, isFalse);
+
+    final registered = await auth.registerLocal(
+      email: 'Test@Example.com',
+      password: 'password123',
     );
-    expect(signOuts, 1);
-  });
+    expect(registered, isTrue);
+    expect(auth.isAuthenticated, isTrue);
+    expect(auth.email, 'test@example.com');
+    expect(auth.hasLocalAccounts, isTrue);
 
-  test('un 401 sans jeton ne déclenche pas de déconnexion', () async {
-    var signOuts = 0;
-    final api = _client(token: null, onUnauthorized: () => signOuts++);
+    final duplicate = await auth.registerLocal(
+      email: 'test@example.com',
+      password: 'password123',
+    );
+    expect(duplicate, isFalse);
 
-    await expectLater(api.me(), throwsA(isA<ApiException>()));
-    expect(signOuts, 0);
+    await auth.signOut();
+    expect(auth.isAuthenticated, isFalse);
+
+    final badLogin = await auth.loginLocal(
+      email: 'test@example.com',
+      password: 'wrong',
+    );
+    expect(badLogin, isFalse);
+
+    final goodLogin = await auth.loginLocal(
+      email: 'test@example.com',
+      password: 'password123',
+    );
+    expect(goodLogin, isTrue);
+    expect(auth.isAuthenticated, isTrue);
   });
 }

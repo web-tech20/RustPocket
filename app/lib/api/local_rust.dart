@@ -2,28 +2,104 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import '../api/models.dart';
+import 'package:flutter/foundation.dart';
 
-/// Runs the Rust toolchain directly on the host machine.
+import '../api/models.dart';
+import 'native_rust_engine.dart';
+
+/// Runs Rust code locally on the device.
 ///
-/// This is the offline counterpart of the RustPocket server sandbox: it
-/// shells out to `rustc` / `rustfmt` and shapes their output into the same
-/// models the UI already consumes. It only works where a Rust toolchain is
-/// installed (development machines and tests).
+/// - On Android and iOS, uses the embedded native engine (`librustpocket_engine`)
+///   via FFI, working 100% offline.
+/// - On Desktop (Linux, macOS, Windows), uses `rustc` / `rustfmt` if installed
+///   on the host, or falls back to the embedded native engine.
 class LocalRust {
   LocalRust({this.timeout = const Duration(seconds: 10)});
 
   final Duration timeout;
+  final Map<String, String> _resolvedBinaries = {};
+  final NativeRustEngine _native = NativeRustEngine();
+
+  bool get _preferNativeEngine =>
+      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  static const _webUnsupportedMessage =
+      'Exécution locale indisponible dans un navigateur Web. '
+      'Lancez l’application en natif (Linux, macOS, Windows ou mobile).';
+
+  /// Resolves a toolchain binary (`rustc` or `rustfmt`) on PATH or common
+  /// install locations such as `~/.cargo/bin`.
+  Future<String?> _resolveBinary(String name) async {
+    if (kIsWeb) return null;
+    final cached = _resolvedBinaries[name];
+    if (cached != null) return cached;
+
+    final candidates = <String>[name];
+    final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'];
+    final ext = Platform.isWindows ? '.exe' : '';
+    if (home != null && home.isNotEmpty) {
+      candidates.add('$home${Platform.pathSeparator}.cargo${Platform.pathSeparator}bin${Platform.pathSeparator}$name$ext');
+    }
+    if (!Platform.isWindows) {
+      candidates.add('/usr/local/bin/$name');
+      candidates.add('/usr/bin/$name');
+    }
+
+    for (final candidate in candidates) {
+      try {
+        final result = await Process.run(
+          candidate,
+          ['--version'],
+        ).timeout(const Duration(seconds: 3));
+        if (result.exitCode == 0) {
+          _resolvedBinaries[name] = candidate;
+          return candidate;
+        }
+      } catch (_) {
+        // Try next candidate.
+      }
+    }
+    return null;
+  }
 
   Future<CompileResult> check(String code) => _compile(code, metadataOnly: true);
   Future<CompileResult> compile(String code) => _compile(code, metadataOnly: false);
 
+  /// Core compilation logic. Returns a failure result if rustc is not available.
   Future<CompileResult> _compile(String code, {required bool metadataOnly}) async {
+    if (kIsWeb) {
+      return const CompileResult(
+        success: false,
+        diagnostics: [],
+        rawOutput: _webUnsupportedMessage,
+        durationMs: 0,
+        truncated: false,
+      );
+    }
+
+    if (_preferNativeEngine) {
+      return _native.check(code);
+    }
+
+    final rustc = await _resolveBinary('rustc');
+    if (rustc == null) {
+      if (_native.isAvailable) {
+        return _native.check(code);
+      }
+      return const CompileResult(
+        success: false,
+        diagnostics: [],
+        rawOutput: 'Outils Rust (rustc) introuvables sur cet appareil.',
+        durationMs: 0,
+        truncated: false,
+      );
+    }
+
     final dir = await Directory.systemTemp.createTemp('rustpocket_');
     try {
-      final source = File('${dir.path}/main.rs');
+      final source = File('${dir.path}${Platform.pathSeparator}main.rs');
       await source.writeAsString(code);
-      final binary = '${dir.path}/rustpocket_program';
+      final binary = '${dir.path}${Platform.pathSeparator}rustpocket_program${Platform.isWindows ? '.exe' : ''}';
       final args = <String>[
         '--edition',
         '2021',
@@ -34,7 +110,7 @@ class LocalRust {
         'rustpocket_program',
       ];
       if (metadataOnly) {
-        args.addAll(['--emit=metadata', '-o', '${dir.path}/main.rmeta']);
+        args.addAll(['--emit=metadata', '-o', '${dir.path}${Platform.pathSeparator}main.rmeta']);
       } else {
         args.addAll(['-o', binary]);
       }
@@ -42,7 +118,7 @@ class LocalRust {
 
       final started = DateTime.now();
       final result = await _run(
-        'rustc',
+        rustc,
         args,
         workingDirectory: dir.path,
         timeout: timeout,
@@ -68,27 +144,62 @@ class LocalRust {
     }
   }
 
+  /// Runs the Rust compiler to produce an executable, then executes it.
   Future<RunResult> run(String code) async {
-    final compileResult = await compile(code);
-    if (!compileResult.success) {
-      return RunResult(
+    if (kIsWeb) {
+      return const RunResult(
         success: false,
         timedOut: false,
         exitCode: null,
         stdout: '',
         stderr: '',
-        durationMs: compileResult.durationMs,
+        durationMs: 0,
         truncated: false,
-        compile: compileResult,
+        compile: CompileResult(
+          success: false,
+          diagnostics: [],
+          rawOutput: _webUnsupportedMessage,
+          durationMs: 0,
+          truncated: false,
+        ),
       );
     }
+
+    if (_preferNativeEngine) {
+      return _native.run(code);
+    }
+
+    final rustc = await _resolveBinary('rustc');
+    if (rustc == null) {
+      if (_native.isAvailable) {
+        return _native.run(code);
+      }
+      return const RunResult(
+        success: false,
+        timedOut: false,
+        exitCode: null,
+        stdout: '',
+        stderr: '',
+        durationMs: 0,
+        truncated: false,
+        compile: CompileResult(
+          success: false,
+          diagnostics: [],
+          rawOutput: 'Outils Rust (rustc) introuvables sur cet appareil.',
+          durationMs: 0,
+          truncated: false,
+        ),
+      );
+    }
+
     final dir = await Directory.systemTemp.createTemp('rustpocket_');
     try {
-      final source = File('${dir.path}/main.rs');
+      final source = File('${dir.path}${Platform.pathSeparator}main.rs');
       await source.writeAsString(code);
-      final binary = '${dir.path}/rustpocket_program';
+      final binary = '${dir.path}${Platform.pathSeparator}rustpocket_program${Platform.isWindows ? '.exe' : ''}';
+      final compileStarted = DateTime.now();
       final c = await _run(
-        'rustc',
+        rustc,
         [
           '--edition',
           '2021',
@@ -104,7 +215,22 @@ class LocalRust {
         workingDirectory: dir.path,
         timeout: timeout,
       );
-      if (c.exitCode != 0) {
+      final compileDuration =
+          DateTime.now().difference(compileStarted).inMilliseconds;
+      final diagnostics = _parseDiagnostics(c.stderr);
+      final raw = diagnostics
+          .where((d) => d.level == 'error' || d.level == 'warning')
+          .map((d) => d.rendered ?? '')
+          .where((s) => s.trim().isNotEmpty)
+          .join('\n\n');
+      final compileResult = CompileResult(
+        success: c.exitCode == 0,
+        diagnostics: diagnostics,
+        rawOutput: raw.isNotEmpty ? raw : c.stderr.trim(),
+        durationMs: compileDuration < 0 ? 0 : compileDuration,
+        truncated: false,
+      );
+      if (!compileResult.success) {
         return RunResult(
           success: false,
           timedOut: false,
@@ -137,9 +263,24 @@ class LocalRust {
     }
   }
 
+  /// Attempts to format code using rustfmt. If rustfmt is unavailable,
+  /// throws an informative exception.
   Future<String> format(String code) async {
+    if (kIsWeb) {
+      throw Exception(_webUnsupportedMessage);
+    }
+    if (_preferNativeEngine) {
+      return _native.format(code);
+    }
+    final rustfmt = await _resolveBinary('rustfmt');
+    if (rustfmt == null) {
+      if (_native.isAvailable) {
+        return _native.format(code);
+      }
+      throw Exception('Outils Rust introuvables (rustfmt).');
+    }
     final result = await _runWithStdin(
-      'rustfmt',
+      rustfmt,
       ['--edition', '2021', '--emit', 'stdout'],
       null,
       code,
@@ -149,9 +290,20 @@ class LocalRust {
       final details = result.stderr.trim().isNotEmpty
           ? result.stderr.trim()
           : result.stdout.trim();
-      throw Exception(details);
+      throw Exception('Formatage échoué: $details');
     }
     return result.stdout;
+  }
+
+  /// Safe formatting that doesn't throw: returns (formattedCode, errorMessageOrNull)
+  /// Callers can choose to show the error or keep original code.
+  Future<(String formattedCode, String? errorMessage)> formatSafe(String code) async {
+    try {
+      final formatted = await format(code);
+      return (formatted, null);
+    } catch (e) {
+      return (code, e.toString().replaceFirst('Exception: ', ''));
+    }
   }
 
   List<Diagnostic> _parseDiagnostics(String stderr) {

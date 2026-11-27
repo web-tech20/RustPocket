@@ -1,7 +1,5 @@
 import 'package:material_ui/material_ui.dart';
 
-import '../api/api_client.dart';
-import '../storage/app_settings.dart';
 import '../storage/auth_store.dart';
 import '../theme.dart';
 import '../widgets/rust_logo.dart';
@@ -9,14 +7,10 @@ import '../widgets/rust_logo.dart';
 class LoginScreen extends StatefulWidget {
   const LoginScreen({
     super.key,
-    required this.api,
     required this.auth,
-    required this.settings,
   });
 
-  final ApiClient api;
   final AuthStore auth;
-  final AppSettings settings;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -25,24 +19,21 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  late final TextEditingController _server;
-  bool _registering = false;
+  late bool _registering;
   bool _busy = false;
   bool _obscure = true;
-  bool _localMode = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _server = TextEditingController(text: widget.settings.apiBaseUrl);
+    _registering = !widget.auth.hasLocalAccounts;
   }
 
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
-    _server.dispose();
     super.dispose();
   }
 
@@ -58,13 +49,6 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = 'Le mot de passe doit contenir 8 caractères.');
       return;
     }
-    if (!_localMode) {
-      final serverError = AppSettings.validateBaseUrl(_server.text);
-      if (serverError != null) {
-        setState(() => _error = serverError);
-        return;
-      }
-    }
 
     setState(() {
       _busy = true;
@@ -72,29 +56,16 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      if (_localMode) {
-        final ok = _registering
-            ? await widget.auth.registerLocal(email: email, password: password)
-            : await widget.auth.loginLocal(email: email, password: password);
-        if (!ok) {
-          if (mounted) {
-            setState(
-              () => _error = _registering
-                  ? 'Ce compte existe déjà.'
-                  : 'Identifiants incorrects.',
-            );
-          }
-        }
-      } else {
-        widget.settings.setApiBaseUrl(_server.text);
-        _server.text = widget.settings.apiBaseUrl;
-        final session = _registering
-            ? await widget.api.register(email, password)
-            : await widget.api.login(email, password);
-        await widget.auth.signIn(token: session.token, email: session.email);
+      final ok = _registering
+          ? await widget.auth.registerLocal(email: email, password: password)
+          : await widget.auth.loginLocal(email: email, password: password);
+      if (!ok && mounted) {
+        setState(
+          () => _error = _registering
+              ? 'Ce compte existe déjà sur cet appareil.'
+              : 'Identifiants incorrects.',
+        );
       }
-    } on ApiException catch (e) {
-      if (mounted) setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -125,7 +96,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    'Écrivez, compilez et exécutez du Rust depuis votre poche.',
+                    'Écrivez, compilez et exécutez du Rust en local.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: RustColors.grey,
@@ -165,38 +136,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  if (!_localMode)
-                    ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    title: Text(
-                      'Serveur',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: RustColors.grey,
-                      ),
-                    ),
-                    subtitle: Text(
-                      widget.settings.apiBaseUrl,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: RustColors.grey,
-                      ),
-                    ),
-                    children: [
-                      TextField(
-                        controller: _server,
-                        keyboardType: TextInputType.url,
-                        decoration: const InputDecoration(
-                          labelText: 'Adresse du serveur',
-                          hintText: 'http://192.168.1.20:8080',
-                          helperText:
-                              '10.0.2.2 sur un émulateur Android, IP du PC sur un téléphone.',
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                  ),
                   if (_error != null) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 12),
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
@@ -225,7 +166,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                           )
                         : Text(
-                            _registering ? 'Créer mon compte' : 'Se connecter',
+                            _registering
+                                ? 'Créer mon compte local'
+                                : 'Se connecter',
                           ),
                   ),
                   const SizedBox(height: 10),
@@ -238,35 +181,13 @@ class _LoginScreenState extends State<LoginScreen> {
                           }),
                     child: Text(
                       _registering
-                          ? 'Déjà un compte ? Se connecter'
-                          : 'Pas encore de compte ? S’inscrire',
+                          ? 'Déjà un compte local ? Se connecter'
+                          : 'Pas encore de compte ? Créer un compte local',
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  TextButton.icon(
-                    onPressed: () => setState(() => _localMode = !_localMode),
-                    icon: Icon(
-                      _localMode ? Icons.cloud_outlined : Icons.cloud_off_outlined,
-                      size: 18,
-                    ),
-                    label: Text(
-                      _localMode
-                          ? 'Utiliser un serveur distant'
-                          : 'Créer un compte local (sans serveur)',
-                    ),
-                  ),
-                  TextButton.icon(
-                    // Never disable this while a login is pending: the user
-                    // must be able to bypass a server that does not answer.
-                    onPressed: () => widget.auth.continueOffline(),
-                    icon: const Icon(Icons.cloud_off_outlined, size: 18),
-                    label: const Text('Continuer sans serveur'),
-                  ),
+                  const SizedBox(height: 8),
                   Text(
-                    _localMode
-                        ? 'Compte local : compilation et exécution sur cet appareil (outils Rust requis).'
-                        : 'Mode local : l’éditeur fonctionne, la compilation '
-                            'nécessite une connexion.',
+                    'Votre compte et vos projets sont stockés localement sur cet appareil.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: RustColors.grey,

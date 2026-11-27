@@ -1,8 +1,3 @@
-import 'dart:async';
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
-
 import 'local_rust.dart';
 import 'models.dart';
 
@@ -12,196 +7,29 @@ class ApiException implements Exception {
   final String message;
   final int? statusCode;
 
-  bool get isUnauthorized => statusCode == 401;
-
   @override
   String toString() => message;
 }
 
-/// Thin client for the RustPocket API.
+/// Local Rust execution client.
 ///
-/// The base URL and the token are read through callbacks so the settings
-/// screen can change the server without rebuilding the client.
+/// Runs `rustc` and `rustfmt` directly on the device without any remote server.
 class ApiClient {
-  ApiClient({
-    required this.baseUrlProvider,
-    required this.tokenProvider,
-    http.Client? client,
-    this.onUnauthorized,
-  }) : _client = client ?? http.Client();
+  ApiClient({LocalRust? local}) : _local = local ?? LocalRust();
 
-  final String Function() baseUrlProvider;
-  final String? Function() tokenProvider;
+  final LocalRust _local;
 
-  /// Called when the server rejects an authenticated request, so the app can
-  /// drop an expired session instead of leaving the user stuck.
-  final void Function()? onUnauthorized;
-  final http.Client _client;
-  final LocalRust _local = LocalRust();
+  Future<CompileResult> compile(String code) => _local.compile(code);
 
-  bool _isLocalMode() {
-    final token = tokenProvider();
-    return token == null || token.isEmpty || token == 'local';
-  }
+  Future<CompileResult> check(String code) => _local.check(code);
 
-  Uri _uri(String path) {
-    var base = baseUrlProvider().trim();
-    while (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
-    }
-    return Uri.parse('$base$path');
-  }
-
-  Map<String, String> get _headers {
-    final token = tokenProvider();
-    return {
-      'content-type': 'application/json',
-      if (token != null && token.isNotEmpty) 'authorization': 'Bearer $token',
-    };
-  }
-
-  Future<AuthSession> login(String email, String password) async {
-    final json = await _post('/auth/login', {
-      'email': email,
-      'password': password,
-    });
-    return AuthSession.fromJson(json as Map<String, dynamic>);
-  }
-
-  Future<AuthSession> register(String email, String password) async {
-    final json = await _post('/auth/register', {
-      'email': email,
-      'password': password,
-    });
-    return AuthSession.fromJson(json as Map<String, dynamic>);
-  }
-
-  Future<AccountInfo> me() async {
-    final json = await _get('/me');
-    return AccountInfo.fromJson(json as Map<String, dynamic>);
-  }
-
-  Future<CompileResult> compile(String code) async {
-    if (_isLocalMode()) {
-      return _local.compile(code);
-    }
-    _requireSession();
-    final json = await _post('/compile', {'code': code});
-    return CompileResult.fromJson(json as Map<String, dynamic>);
-  }
-
-  Future<CompileResult> check(String code) async {
-    if (_isLocalMode()) {
-      return _local.check(code);
-    }
-    _requireSession();
-    final json = await _post('/check', {'code': code});
-    return CompileResult.fromJson(json as Map<String, dynamic>);
-  }
-
-  Future<RunResult> run(String code) async {
-    if (_isLocalMode()) {
-      return _local.run(code);
-    }
-    _requireSession();
-    final json = await _post('/run', {'code': code});
-    return RunResult.fromJson(json as Map<String, dynamic>);
-  }
+  Future<RunResult> run(String code) => _local.run(code);
 
   Future<String> format(String code) async {
-    if (_isLocalMode()) {
-      try {
-        return await _local.format(code);
-      } catch (e) {
-        throw ApiException(e.toString().replaceFirst('Exception: ', ''));
-      }
-    }
-    _requireSession();
-    final json = await _post(
-      '/format',
-      {'code': code},
-      timeout: const Duration(seconds: 30),
-    );
-    return (json as Map<String, dynamic>)['code'] as String? ?? code;
-  }
-
-  /// Local mode has no token: fail immediately instead of waiting for the
-  /// network timeout of a server that would reject the request anyway.
-  void _requireSession() {
-    final token = tokenProvider();
-    if (token == null || token.isEmpty) {
-      throw ApiException(
-        'Mode local : connectez-vous pour compiler et exécuter du code.',
-      );
-    }
-  }
-
-  Future<dynamic> _get(String path) async {
     try {
-      final response = await _client
-          .get(_uri(path), headers: _headers)
-          .timeout(const Duration(seconds: 20));
-      return _decode(response);
-    } on TimeoutException {
-      throw ApiException('Le serveur met trop de temps à répondre.');
-    } on ApiException {
-      rethrow;
-    } catch (_) {
-      throw _unreachable();
+      return await _local.format(code);
+    } catch (e) {
+      throw ApiException(e.toString().replaceFirst('Exception: ', ''));
     }
-  }
-
-  Future<dynamic> _post(
-    String path,
-    Map<String, dynamic> body, {
-    Duration timeout = const Duration(seconds: 60),
-  }) async {
-    try {
-      final response = await _client
-          .post(_uri(path), headers: _headers, body: jsonEncode(body))
-          .timeout(timeout);
-      return _decode(response);
-    } on TimeoutException {
-      throw ApiException('Le serveur met trop de temps à répondre.');
-    } on ApiException {
-      rethrow;
-    } catch (_) {
-      throw _unreachable();
-    }
-  }
-
-  ApiException _unreachable() => ApiException(
-    'Serveur injoignable. Vérifiez l’adresse du serveur et votre connexion.',
-  );
-
-  dynamic _decode(http.Response response) {
-    dynamic json;
-    if (response.body.trim().isNotEmpty) {
-      try {
-        json = jsonDecode(utf8.decode(response.bodyBytes));
-      } catch (_) {
-        json = null;
-      }
-    }
-
-    if (response.statusCode >= 400) {
-      String? message;
-      if (json is Map<String, dynamic>) {
-        final error = json['error'];
-        if (error is Map<String, dynamic>) {
-          message = error['message'] as String?;
-        }
-      }
-      if (response.statusCode == 401 &&
-          (tokenProvider()?.isNotEmpty ?? false)) {
-        onUnauthorized?.call();
-      }
-      throw ApiException(
-        message ?? 'Erreur du serveur (${response.statusCode}).',
-        statusCode: response.statusCode,
-      );
-    }
-
-    return json;
   }
 }

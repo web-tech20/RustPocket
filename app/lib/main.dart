@@ -17,14 +17,7 @@ Future<void> main() async {
   final auth = AuthStore.load(prefs);
   final projects = ProjectStore(prefs);
   final navigatorKey = GlobalKey<NavigatorState>();
-  final api = ApiClient(
-    baseUrlProvider: () => settings.apiBaseUrl,
-    tokenProvider: () => auth.token,
-    onUnauthorized: () {
-      navigatorKey.currentState?.popUntil((route) => route.isFirst);
-      auth.signOut();
-    },
-  );
+  final api = ApiClient();
 
   runApp(
     RustPocketApp(
@@ -69,7 +62,7 @@ class RustPocketApp extends StatelessWidget {
             animation: auth,
             builder: (context, _) {
               if (!auth.isAuthenticated) {
-                return LoginScreen(api: api, auth: auth, settings: settings);
+                return LoginScreen(auth: auth);
               }
               return HomeScreen(
                 api: api,

@@ -143,7 +143,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SettingsScreen(
-          api: widget.api,
           auth: widget.auth,
           settings: widget.settings,
         ),

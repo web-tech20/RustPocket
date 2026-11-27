@@ -82,8 +82,10 @@ class AuthStore extends ChangeNotifier {
   bool hasLocalAccount(String email) =>
       _accounts().containsKey(email.trim().toLowerCase());
 
-  /// Opens the app without an account so the editor can be used while the
-  /// server is unreachable. Compilation still requires a real session.
+  /// True when at least one local account is stored on this device.
+  bool get hasLocalAccounts => _accounts().isNotEmpty;
+
+  /// Opens the app in guest mode without creating an account.
   Future<void> continueOffline() async {
     _offline = true;
     _token = null;

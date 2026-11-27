@@ -1,42 +1,24 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:rustpocket/storage/app_settings.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  group('normalizeBaseUrl', () {
-    test('ajoute http et retire les slashs finaux', () {
-      expect(
-        AppSettings.normalizeBaseUrl(' 192.168.1.20:8080/ '),
-        'http://192.168.1.20:8080',
-      );
-    });
+  test('AppSettings charge les valeurs par défaut et borne la police', () async {
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final settings = AppSettings.load(prefs);
 
-    test('conserve une adresse https', () {
-      expect(
-        AppSettings.normalizeBaseUrl('https://api.example.com/'),
-        'https://api.example.com',
-      );
-    });
-  });
+    expect(settings.themeMode, ThemeMode.dark);
+    expect(settings.editorFontSize, AppSettings.defaultFontSize);
 
-  group('validateBaseUrl', () {
-    test('accepte une adresse locale sans schéma', () {
-      expect(AppSettings.validateBaseUrl('10.0.2.2:8080'), isNull);
-    });
+    settings.editorFontSize = 30.0;
+    expect(settings.editorFontSize, 22.0);
 
-    test('accepte une adresse https', () {
-      expect(AppSettings.validateBaseUrl('https://rust.example.com'), isNull);
-    });
+    settings.editorFontSize = 8.0;
+    expect(settings.editorFontSize, 12.0);
 
-    test('refuse une adresse vide', () {
-      expect(AppSettings.validateBaseUrl('   '), isNotNull);
-    });
-
-    test('refuse un schéma non http', () {
-      expect(AppSettings.validateBaseUrl('ftp://example.com'), isNotNull);
-    });
-
-    test('refuse une adresse sans hôte', () {
-      expect(AppSettings.validateBaseUrl('http://'), isNotNull);
-    });
+    settings.themeMode = ThemeMode.light;
+    expect(AppSettings.load(prefs).themeMode, ThemeMode.light);
   });
 }

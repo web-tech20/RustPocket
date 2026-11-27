@@ -1,0 +1,14 @@
+/home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/e4f1432260507e07/out/serde-e4f1432260507e07.d: /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/0befb32ccf423564/out/private.rs
+
+/home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/e4f1432260507e07/out/libserde-e4f1432260507e07.rlib: /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/0befb32ccf423564/out/private.rs
+
+/home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/e4f1432260507e07/out/libserde-e4f1432260507e07.rmeta: /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs /home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs /home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/0befb32ccf423564/out/private.rs
+
+/home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs:
+/home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/integer128.rs:
+/home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/mod.rs:
+/home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/de.rs:
+/home/kisito/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/private/ser.rs:
+/home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/0befb32ccf423564/out/private.rs:
+
+# env-dep:OUT_DIR=/home/kisito/Documents/Appflutter_rust/engine/target/release/build/serde/0befb32ccf423564/out

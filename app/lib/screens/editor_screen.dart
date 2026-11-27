@@ -1,5 +1,7 @@
 import 'dart:async';
 
+// ignore: deprecated_member_use
+import 'package:flutter/material.dart' as flutter_material;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_code_editor/flutter_code_editor.dart';
 import 'package:highlight/languages/rust.dart';
@@ -216,7 +218,7 @@ class _EditorScreenState extends State<EditorScreen> {
         ],
       ),
     );
-    controller.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) => controller.dispose());
     if (name == null) return;
 
     await widget.projects.rename(_project.id, name);
@@ -290,9 +292,19 @@ class _EditorScreenState extends State<EditorScreen> {
             child: Column(
               children: [
                 Expanded(
-                  child: CodeTheme(
-                    data: buildCodeTheme(brightness),
-                    child: CodeField(
+                  // CodeField embeds a TextField, which requires a Material
+                  // ancestor for its ink/selection rendering.
+                  child: Localizations(
+                    locale: const Locale('en', 'US'),
+                    delegates: const [
+                      flutter_material.DefaultMaterialLocalizations.delegate,
+                      DefaultWidgetsLocalizations.delegate,
+                    ],
+                    child: flutter_material.Material(
+                      color: Colors.transparent,
+                      child: CodeTheme(
+                      data: buildCodeTheme(brightness),
+                      child: CodeField(
                       controller: _controller,
                       focusNode: _focusNode,
                       expands: true,
@@ -321,6 +333,8 @@ class _EditorScreenState extends State<EditorScreen> {
                         ),
                       ),
                     ),
+                                      ),
+                  ),
                   ),
                 ),
                 if (_panelOpen) ...[

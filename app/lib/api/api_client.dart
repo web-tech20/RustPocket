@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import 'local_rust.dart';
 import 'models.dart';
 
 class ApiException implements Exception {
@@ -36,6 +37,12 @@ class ApiClient {
   /// drop an expired session instead of leaving the user stuck.
   final void Function()? onUnauthorized;
   final http.Client _client;
+  final LocalRust _local = LocalRust();
+
+  bool _isLocalMode() {
+    final token = tokenProvider();
+    return token == null || token.isEmpty || token == 'local';
+  }
 
   Uri _uri(String path) {
     var base = baseUrlProvider().trim();
@@ -75,24 +82,40 @@ class ApiClient {
   }
 
   Future<CompileResult> compile(String code) async {
+    if (_isLocalMode()) {
+      return _local.compile(code);
+    }
     _requireSession();
     final json = await _post('/compile', {'code': code});
     return CompileResult.fromJson(json as Map<String, dynamic>);
   }
 
   Future<CompileResult> check(String code) async {
+    if (_isLocalMode()) {
+      return _local.check(code);
+    }
     _requireSession();
     final json = await _post('/check', {'code': code});
     return CompileResult.fromJson(json as Map<String, dynamic>);
   }
 
   Future<RunResult> run(String code) async {
+    if (_isLocalMode()) {
+      return _local.run(code);
+    }
     _requireSession();
     final json = await _post('/run', {'code': code});
     return RunResult.fromJson(json as Map<String, dynamic>);
   }
 
   Future<String> format(String code) async {
+    if (_isLocalMode()) {
+      try {
+        return await _local.format(code);
+      } catch (e) {
+        throw ApiException(e.toString().replaceFirst('Exception: ', ''));
+      }
+    }
     _requireSession();
     final json = await _post(
       '/format',

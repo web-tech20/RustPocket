@@ -29,6 +29,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _registering = false;
   bool _busy = false;
   bool _obscure = true;
+  bool _localMode = false;
   String? _error;
 
   @override
@@ -57,24 +58,41 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = 'Le mot de passe doit contenir 8 caractères.');
       return;
     }
-    final serverError = AppSettings.validateBaseUrl(_server.text);
-    if (serverError != null) {
-      setState(() => _error = serverError);
-      return;
+    if (!_localMode) {
+      final serverError = AppSettings.validateBaseUrl(_server.text);
+      if (serverError != null) {
+        setState(() => _error = serverError);
+        return;
+      }
     }
 
     setState(() {
       _busy = true;
       _error = null;
     });
-    widget.settings.setApiBaseUrl(_server.text);
-    _server.text = widget.settings.apiBaseUrl;
 
     try {
-      final session = _registering
-          ? await widget.api.register(email, password)
-          : await widget.api.login(email, password);
-      await widget.auth.signIn(token: session.token, email: session.email);
+      if (_localMode) {
+        final ok = _registering
+            ? await widget.auth.registerLocal(email: email, password: password)
+            : await widget.auth.loginLocal(email: email, password: password);
+        if (!ok) {
+          if (mounted) {
+            setState(
+              () => _error = _registering
+                  ? 'Ce compte existe déjà.'
+                  : 'Identifiants incorrects.',
+            );
+          }
+        }
+      } else {
+        widget.settings.setApiBaseUrl(_server.text);
+        _server.text = widget.settings.apiBaseUrl;
+        final session = _registering
+            ? await widget.api.register(email, password)
+            : await widget.api.login(email, password);
+        await widget.auth.signIn(token: session.token, email: session.email);
+      }
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } finally {
@@ -148,7 +166,8 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  ExpansionTile(
+                  if (!_localMode)
+                    ExpansionTile(
                     tilePadding: EdgeInsets.zero,
                     title: Text(
                       'Serveur',
@@ -225,6 +244,18 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 4),
                   TextButton.icon(
+                    onPressed: () => setState(() => _localMode = !_localMode),
+                    icon: Icon(
+                      _localMode ? Icons.cloud_outlined : Icons.cloud_off_outlined,
+                      size: 18,
+                    ),
+                    label: Text(
+                      _localMode
+                          ? 'Utiliser un serveur distant'
+                          : 'Créer un compte local (sans serveur)',
+                    ),
+                  ),
+                  TextButton.icon(
                     // Never disable this while a login is pending: the user
                     // must be able to bypass a server that does not answer.
                     onPressed: () => widget.auth.continueOffline(),
@@ -232,8 +263,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     label: const Text('Continuer sans serveur'),
                   ),
                   Text(
-                    'Mode local : l’éditeur fonctionne, la compilation '
-                    'nécessite une connexion.',
+                    _localMode
+                        ? 'Compte local : compilation et exécution sur cet appareil (outils Rust requis).'
+                        : 'Mode local : l’éditeur fonctionne, la compilation '
+                            'nécessite une connexion.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: RustColors.grey,

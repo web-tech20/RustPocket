@@ -43,3 +43,37 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+val engineDir = rootProject.projectDir.parentFile.parentFile.resolve("engine")
+val jniLibsDir = projectDir.resolve("src/main/jniLibs")
+
+tasks.register<Exec>("buildRustNativeEngine") {
+    val home = System.getenv("HOME") ?: System.getProperty("user.home")
+    val cargoBin = file("$home/.cargo/bin").absolutePath
+    val currentPath = System.getenv("PATH") ?: ""
+    val cargo = file("$cargoBin/cargo").let {
+        if (it.exists()) it.absolutePath else "cargo"
+    }
+
+    inputs.dir(engineDir.resolve("src"))
+    inputs.file(engineDir.resolve("Cargo.toml"))
+    outputs.dir(jniLibsDir)
+
+    workingDir = engineDir
+    environment("PATH", "$cargoBin:$currentPath")
+    environment("ANDROID_NDK_HOME", android.ndkDirectory.absolutePath)
+
+    commandLine(
+        cargo,
+        "ndk",
+        "-t", "arm64-v8a",
+        "-t", "armeabi-v7a",
+        "-t", "x86_64",
+        "-o", jniLibsDir.absolutePath,
+        "build", "--release"
+    )
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn("buildRustNativeEngine")
+}

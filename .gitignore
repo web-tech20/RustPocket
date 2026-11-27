@@ -8,3 +8,7 @@ server/*.db-wal
 
 # Rapports de compilation locaux
 *.log
+
+# Moteur natif embarqué (généré automatiquement par Gradle / Cargo)
+engine/target/
+app/android/app/src/main/jniLibs/

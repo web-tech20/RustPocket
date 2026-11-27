@@ -13,7 +13,7 @@ class NativeRustEngine {
     );
   }
 
-  Future<RunResult> run(String code) async {
+  Future<RunResult> run(String code, {String stdin = ''}) async {
     return const RunResult(
       success: false,
       timedOut: false,

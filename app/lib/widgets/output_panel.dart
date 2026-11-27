@@ -13,6 +13,9 @@ class OutputPanel extends StatelessWidget {
     required this.run,
     required this.onLineTap,
     required this.onClose,
+    this.waitingForInput = false,
+    this.stdinController,
+    this.onSubmitStdin,
   });
 
   final bool busy;
@@ -22,6 +25,9 @@ class OutputPanel extends StatelessWidget {
   final RunResult? run;
   final ValueChanged<int> onLineTap;
   final VoidCallback onClose;
+  final bool waitingForInput;
+  final TextEditingController? stdinController;
+  final VoidCallback? onSubmitStdin;
 
   @override
   Widget build(BuildContext context) {
@@ -121,6 +127,62 @@ class OutputPanel extends StatelessWidget {
               ),
             ),
           ),
+          if (waitingForInput && stdinController != null) ...[
+            Divider(height: 1, color: theme.colorScheme.outline),
+            Container(
+              color: theme.brightness == Brightness.dark
+                  ? const Color(0xFF0E1014)
+                  : const Color(0xFFEAEAEA),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              child: Row(
+                children: [
+                  const Text(
+                    '> ',
+                    style: TextStyle(
+                      color: Color(0xFF4CAF50),
+                      fontFamily: 'monospace',
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: stdinController,
+                      autofocus: true,
+                      style: TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 13.5,
+                        color: theme.colorScheme.onSurface,
+                      ),
+                      decoration: InputDecoration(
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                        hintText: 'Entrez une valeur…',
+                        hintStyle: TextStyle(
+                          color: RustColors.grey,
+                          fontFamily: 'monospace',
+                          fontSize: 13,
+                        ),
+                      ),
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => onSubmitStdin?.call(),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Envoyer',
+                    icon: const Icon(
+                      Icons.send_rounded,
+                      color: Color(0xFF4CAF50),
+                      size: 20,
+                    ),
+                    onPressed: onSubmitStdin,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -167,6 +229,13 @@ class OutputPanel extends StatelessWidget {
       return (Icons.error_outline, theme.colorScheme.error, message!);
     }
     if (run != null) {
+      if (waitingForInput || run!.needsInput) {
+        return (
+          Icons.keyboard_alt_outlined,
+          RustColors.orange,
+          'En attente d’entrée clavier…',
+        );
+      }
       if (run!.timedOut) {
         return (
           Icons.timer_off_outlined,

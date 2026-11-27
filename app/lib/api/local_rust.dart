@@ -145,7 +145,7 @@ class LocalRust {
   }
 
   /// Runs the Rust compiler to produce an executable, then executes it.
-  Future<RunResult> run(String code) async {
+  Future<RunResult> run(String code, {String stdin = ''}) async {
     if (kIsWeb) {
       return const RunResult(
         success: false,
@@ -166,13 +166,13 @@ class LocalRust {
     }
 
     if (_preferNativeEngine) {
-      return _native.run(code);
+      return _native.run(code, stdin: stdin);
     }
 
     final rustc = await _resolveBinary('rustc');
     if (rustc == null) {
       if (_native.isAvailable) {
-        return _native.run(code);
+        return _native.run(code, stdin: stdin);
       }
       return const RunResult(
         success: false,
@@ -244,7 +244,7 @@ class LocalRust {
       }
 
       final started = DateTime.now();
-      final exec = await _runBinary(binary, dir.path);
+      final exec = await _runBinary(binary, dir.path, stdin: stdin);
       final duration = DateTime.now().difference(started).inMilliseconds;
       return RunResult(
         success: !exec.timedOut && exec.exitCode == 0,
@@ -445,7 +445,11 @@ class LocalRust {
     }
   }
 
-  Future<_ProcessResult> _runBinary(String binary, String workdir) async {
+  Future<_ProcessResult> _runBinary(
+    String binary,
+    String workdir, {
+    String stdin = '',
+  }) async {
     final t = timeout;
     try {
       final proc = await Process.start(
@@ -459,6 +463,10 @@ class LocalRust {
           'LANG': 'C.UTF-8',
         },
       );
+      if (stdin.isNotEmpty) {
+        proc.stdin.write(stdin);
+      }
+      await proc.stdin.close();
       final stdoutFuture = proc.stdout.transform(utf8.decoder).join();
       final stderrFuture = proc.stderr.transform(utf8.decoder).join();
       int? exitCode;

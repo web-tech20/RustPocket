@@ -14,6 +14,15 @@ typedef _FreeBytesDart = void Function(Pointer<Uint8> ptr, int len);
 typedef _CallNative = Pointer<Uint8> Function(Pointer<Uint8> code);
 typedef _CallDart = Pointer<Uint8> Function(Pointer<Uint8> code);
 
+typedef _Call2Native = Pointer<Uint8> Function(
+  Pointer<Uint8> code,
+  Pointer<Uint8> stdin,
+);
+typedef _Call2Dart = Pointer<Uint8> Function(
+  Pointer<Uint8> code,
+  Pointer<Uint8> stdin,
+);
+
 typedef _FreeStringNative = Void Function(Pointer<Uint8> ptr);
 typedef _FreeStringDart = void Function(Pointer<Uint8> ptr);
 
@@ -98,6 +107,53 @@ class NativeRustEngine {
     }
   }
 
+  static Pointer<Uint8> _allocCString(
+    _AllocDart alloc,
+    String text,
+    List<(Pointer<Uint8>, int)> toFree,
+  ) {
+    final encoded = utf8.encode(text);
+    final totalLen = encoded.length + 1;
+    final ptr = alloc(totalLen);
+    final view = ptr.asTypedList(totalLen);
+    view.setRange(0, encoded.length, encoded);
+    view[encoded.length] = 0;
+    toFree.add((ptr, totalLen));
+    return ptr;
+  }
+
+  static String _invokeSymbol2(String symbolName, String code, String stdin) {
+    final lib = _tryOpenLibrary();
+    if (lib == null) {
+      throw StateError('Bibliothèque native librustpocket_engine introuvable.');
+    }
+
+    final alloc = lib.lookupFunction<_AllocNative, _AllocDart>('rustpocket_alloc');
+    final freeBytes = lib.lookupFunction<_FreeBytesNative, _FreeBytesDart>(
+      'rustpocket_free_bytes',
+    );
+    final fn = lib.lookupFunction<_Call2Native, _Call2Dart>(symbolName);
+    final freeString = lib.lookupFunction<_FreeStringNative, _FreeStringDart>(
+      'rustpocket_free_string',
+    );
+
+    final toFree = <(Pointer<Uint8>, int)>[];
+    try {
+      final codePtr = _allocCString(alloc, code, toFree);
+      final stdinPtr = _allocCString(alloc, stdin, toFree);
+      final outPtr = fn(codePtr, stdinPtr);
+      try {
+        return _readCString(outPtr);
+      } finally {
+        freeString(outPtr);
+      }
+    } finally {
+      for (final (ptr, len) in toFree) {
+        freeBytes(ptr, len);
+      }
+    }
+  }
+
   static String _readCString(Pointer<Uint8> ptr) {
     if (ptr == nullptr) return '{}';
     var length = 0;
@@ -114,8 +170,10 @@ class NativeRustEngine {
     return CompileResult.fromJson(json);
   }
 
-  Future<RunResult> run(String code) async {
-    final raw = await Isolate.run(() => _invokeSymbol('rustpocket_run', code));
+  Future<RunResult> run(String code, {String stdin = ''}) async {
+    final raw = await Isolate.run(
+      () => _invokeSymbol2('rustpocket_run_with_stdin', code, stdin),
+    );
     final json = jsonDecode(raw) as Map<String, dynamic>;
     return RunResult.fromJson(json);
   }

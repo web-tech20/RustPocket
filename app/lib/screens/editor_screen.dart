@@ -45,6 +45,9 @@ class _EditorScreenState extends State<EditorScreen> {
   String? _message;
   CompileResult? _checkResult;
   RunResult? _runResult;
+  String _stdinBuffer = '';
+  bool _waitingForInput = false;
+  final TextEditingController _stdinController = TextEditingController();
 
   @override
   void initState() {
@@ -63,6 +66,7 @@ class _EditorScreenState extends State<EditorScreen> {
     _focusNode.removeListener(_onFocusChanged);
     _controller.dispose();
     _focusNode.dispose();
+    _stdinController.dispose();
     super.dispose();
   }
 
@@ -100,22 +104,46 @@ class _EditorScreenState extends State<EditorScreen> {
       _message = null;
       _runResult = null;
       _checkResult = null;
+      _stdinBuffer = '';
+      _waitingForInput = false;
+      _stdinController.clear();
     });
 
+    await _executeWithCurrentStdin();
+  }
+
+  Future<void> _executeWithCurrentStdin() async {
     try {
-      final result = await widget.api.run(_controller.fullText);
+      final result = await widget.api.run(
+        _controller.fullText,
+        stdin: _stdinBuffer,
+      );
       if (!mounted) return;
       setState(() {
         _runResult = result;
+        _waitingForInput = result.needsInput;
         _busy = null;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() {
         _message = e.message;
+        _waitingForInput = false;
         _busy = null;
       });
     }
+  }
+
+  Future<void> _submitStdinLine() async {
+    if (_busy != null) return;
+    final line = _stdinController.text;
+    _stdinController.clear();
+    setState(() {
+      _stdinBuffer += '$line\n';
+      _waitingForInput = false;
+      _busy = _BusyAction.run;
+    });
+    await _executeWithCurrentStdin();
   }
 
   Future<void> _check() async {
@@ -498,8 +526,14 @@ class _EditorScreenState extends State<EditorScreen> {
                         message: _message,
                         compile: _checkResult,
                         run: _runResult,
+                        waitingForInput: _waitingForInput,
+                        stdinController: _stdinController,
+                        onSubmitStdin: _submitStdinLine,
                         onLineTap: _goToLine,
-                        onClose: () => setState(() => _panelOpen = false),
+                        onClose: () => setState(() {
+                          _panelOpen = false;
+                          _waitingForInput = false;
+                        }),
                       ),
                     ),
                   ),

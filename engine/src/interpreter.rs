@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::time::Instant;
 
@@ -30,6 +30,14 @@ pub enum Value {
     Enum { name: String, variant: String, payload: Vec<Value> },
     Option(Option<Box<Value>>),
     Result(std::result::Result<Box<Value>, Box<Value>>),
+    Map(HashMap<String, Value>),
+    Stdin,
+    Stdout,
+    Command {
+        cmd: String,
+        args_list: Vec<String>,
+        envs: Vec<(String, String)>,
+    },
     Closure {
         params: Vec<String>,
         body: Box<Expr>,
@@ -53,6 +61,10 @@ impl Value {
             Value::Enum { .. } => "enum",
             Value::Option(_) => "Option",
             Value::Result(_) => "Result",
+            Value::Map(_) => "HashMap",
+            Value::Stdin => "Stdin",
+            Value::Stdout => "Stdout",
+            Value::Command { .. } => "Command",
             Value::Closure { .. } => "closure",
         }
     }
@@ -124,6 +136,19 @@ impl Value {
             Value::Option(None) => "None".to_string(),
             Value::Result(Ok(v)) => format!("Ok({})", v.debug_str()),
             Value::Result(Err(e)) => format!("Err({})", e.debug_str()),
+            Value::Map(m) => {
+                let mut pairs: Vec<_> = m.iter().collect();
+                pairs.sort_by_key(|(k, _)| *k);
+                let inner = pairs
+                    .into_iter()
+                    .map(|(k, v)| format!("{k:?}: {}", v.debug_str()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("{{{inner}}}")
+            }
+            Value::Stdin => "Stdin { .. }".to_string(),
+            Value::Stdout => "Stdout { .. }".to_string(),
+            Value::Command { cmd, .. } => format!("Command({cmd:?})"),
             Value::Closure { .. } => "<closure>".to_string(),
         }
     }
@@ -146,6 +171,7 @@ enum ControlFlow {
     Return(Value),
     Break(Option<Value>),
     Continue,
+    NeedsInput,
     Error(RuntimeError),
 }
 
@@ -253,6 +279,8 @@ struct Interpreter {
     methods: HashMap<String, HashMap<String, FnDef>>,
     consts: HashMap<String, Value>,
     enum_variants: HashMap<String, String>,
+    stdin_lines: VecDeque<String>,
+    needs_input: bool,
     stdout: String,
     stderr: String,
     truncated: bool,
@@ -261,12 +289,25 @@ struct Interpreter {
 }
 
 impl Interpreter {
-    fn new() -> Self {
+    fn new(stdin_text: &str) -> Self {
+        let mut stdin_lines = VecDeque::new();
+        if !stdin_text.is_empty() {
+            for line in stdin_text.split_inclusive('\n') {
+                stdin_lines.push_back(line.to_string());
+            }
+            if !stdin_text.ends_with('\n') {
+                if let Some(last) = stdin_lines.back_mut() {
+                    last.push('\n');
+                }
+            }
+        }
         Self {
             functions: HashMap::new(),
             methods: HashMap::new(),
             consts: HashMap::new(),
             enum_variants: HashMap::new(),
+            stdin_lines,
+            needs_input: false,
             stdout: String::new(),
             stderr: String::new(),
             truncated: false,
@@ -659,6 +700,8 @@ impl Interpreter {
                 })
             }
             Expr::Reference(r) => self.eval_expr(&r.expr, env),
+            Expr::Await(a) => self.eval_expr(&a.base, env),
+            Expr::Async(a) => self.eval_block(&a.block, env),
             Expr::Try(t) => match self.eval_expr(&t.expr, env)? {
                 Value::Option(Some(v)) => Ok(*v),
                 Value::Option(None) => Err(ControlFlow::Return(Value::Option(None))),
@@ -1067,15 +1110,46 @@ impl Interpreter {
                     });
                 }
                 return self.call_fn(name, args, c.span());
-            } else if segs.len() == 2 {
-                let (ty, method) = (segs[0].as_str(), segs[1].as_str());
+            } else if segs.len() >= 2 {
+                let ty = segs[segs.len() - 2].as_str();
+                let method = segs[segs.len() - 1].as_str();
                 match (ty, method) {
-                    ("Vec", "new") => return Ok(Value::Array(vec![])),
-                    ("Vec", "with_capacity") => return Ok(Value::Array(vec![])),
+                    ("Vec", "new") | ("Vec", "with_capacity") => return Ok(Value::Array(vec![])),
+                    ("HashMap", "new") | ("HashMap", "with_capacity") => {
+                        return Ok(Value::Map(HashMap::new()));
+                    }
                     ("String", "new") => return Ok(Value::Str(String::new())),
                     ("String", "from") => {
                         let s = args.into_iter().next().map(|v| v.display_str()).unwrap_or_default();
                         return Ok(Value::Str(s));
+                    }
+                    ("io", "stdin") => return Ok(Value::Stdin),
+                    ("io", "stdout") => return Ok(Value::Stdout),
+                    ("Command", "new") => {
+                        let cmd = args.into_iter().next().map(|v| v.display_str()).unwrap_or_default();
+                        return Ok(Value::Command {
+                            cmd,
+                            args_list: vec![],
+                            envs: vec![],
+                        });
+                    }
+                    ("env", "args") => return Ok(Value::Array(vec![])),
+                    ("env", "var") => {
+                        return Ok(Value::Result(Err(Box::new(Value::Str(
+                            "variable d'environnement introuvable".to_string(),
+                        )))));
+                    }
+                    ("fs", "read_to_string") => {
+                        return Ok(Value::Result(Err(Box::new(Value::Str(
+                            "fs::read_to_string non disponible dans ce sandbox".to_string(),
+                        )))));
+                    }
+                    ("fs", "write") => {
+                        return Ok(Value::Result(Ok(Box::new(Value::Unit))));
+                    }
+                    ("thread", "sleep") => return Ok(Value::Unit),
+                    ("Duration", "from_millis") | ("Duration", "from_secs") => {
+                        return Ok(Value::Unit);
                     }
                     ("Option", "Some") => {
                         let v = args.into_iter().next().unwrap_or(Value::Unit);
@@ -1182,6 +1256,26 @@ impl Interpreter {
                             return Ok(Value::Unit);
                         }
                     }
+                    (Value::Map(m), "insert") => {
+                        if args.len() >= 2 {
+                            let mut next = m.clone();
+                            let prev = next.insert(args[0].display_str(), args[1].clone());
+                            env.set(&var_name, Value::Map(next));
+                            return Ok(Value::Option(prev.map(Box::new)));
+                        }
+                    }
+                    (Value::Map(m), "remove") => {
+                        if let Some(k) = args.first() {
+                            let mut next = m.clone();
+                            let prev = next.remove(&k.display_str());
+                            env.set(&var_name, Value::Map(next));
+                            return Ok(Value::Option(prev.map(Box::new)));
+                        }
+                    }
+                    (Value::Map(_), "clear") => {
+                        env.set(&var_name, Value::Map(HashMap::new()));
+                        return Ok(Value::Unit);
+                    }
                     _ => {}
                 }
             }
@@ -1218,6 +1312,36 @@ impl Interpreter {
                 Ok(Value::Array(parts))
             }
             (Value::Str(s), "chars") => Ok(Value::Array(s.chars().map(Value::Char).collect())),
+            (Value::Str(s), "bytes") => Ok(Value::Array(s.bytes().map(|b| Value::Int(b as i64)).collect())),
+            (Value::Str(s), "lines") => Ok(Value::Array(s.lines().map(|l| Value::Str(l.to_string())).collect())),
+            (Value::Str(s), "split_whitespace") => Ok(Value::Array(
+                s.split_whitespace().map(|w| Value::Str(w.to_string())).collect(),
+            )),
+            (Value::Str(s), "repeat") => {
+                let n = match args.first() {
+                    Some(Value::Int(n)) if *n >= 0 => *n as usize,
+                    _ => 1,
+                };
+                Ok(Value::Str(s.repeat(n)))
+            }
+            (Value::Str(s), "to_ascii_uppercase") => Ok(Value::Str(s.to_ascii_uppercase())),
+            (Value::Str(s), "to_ascii_lowercase") => Ok(Value::Str(s.to_ascii_lowercase())),
+            (Value::Char(c), "is_alphabetic") => Ok(Value::Bool(c.is_alphabetic())),
+            (Value::Char(c), "is_numeric") | (Value::Char(c), "is_ascii_digit") => {
+                Ok(Value::Bool(c.is_ascii_digit()))
+            }
+            (Value::Char(c), "is_whitespace") => Ok(Value::Bool(c.is_whitespace())),
+            (Value::Char(c), "is_uppercase") => Ok(Value::Bool(c.is_uppercase())),
+            (Value::Char(c), "is_lowercase") => Ok(Value::Bool(c.is_lowercase())),
+            (Value::Char(c), "to_uppercase") => Ok(Value::Str(c.to_uppercase().to_string())),
+            (Value::Char(c), "to_lowercase") => Ok(Value::Str(c.to_lowercase().to_string())),
+            (Value::Char(c), "to_digit") => {
+                let radix = match args.first() {
+                    Some(Value::Int(r)) if *r > 0 => *r as u32,
+                    _ => 10,
+                };
+                Ok(Value::Option(c.to_digit(radix).map(|d| Box::new(Value::Int(d as i64)))))
+            }
             (Value::Str(s), "parse") => {
                 if let Ok(n) = s.trim().parse::<i64>() {
                     Ok(Value::Result(Ok(Box::new(Value::Int(n)))))
@@ -1298,6 +1422,159 @@ impl Interpreter {
                 }
                 Ok(if is_float { Value::Float(float_sum + int_sum as f64) } else { Value::Int(int_sum) })
             }
+            (Value::Array(items), "any") => {
+                let Some(Value::Closure { params, body, captured }) = args.into_iter().next() else {
+                    return Err(RuntimeError::new("closure attendue dans `.any(...)`", mc.span()).into());
+                };
+                for item in items {
+                    if matches!(self.invoke_closure(&params, &body, &captured, vec![item], mc.span())?, Value::Bool(true)) {
+                        return Ok(Value::Bool(true));
+                    }
+                }
+                Ok(Value::Bool(false))
+            }
+            (Value::Array(items), "all") => {
+                let Some(Value::Closure { params, body, captured }) = args.into_iter().next() else {
+                    return Err(RuntimeError::new("closure attendue dans `.all(...)`", mc.span()).into());
+                };
+                for item in items {
+                    if !matches!(self.invoke_closure(&params, &body, &captured, vec![item], mc.span())?, Value::Bool(true)) {
+                        return Ok(Value::Bool(false));
+                    }
+                }
+                Ok(Value::Bool(true))
+            }
+            (Value::Array(items), "find") => {
+                let Some(Value::Closure { params, body, captured }) = args.into_iter().next() else {
+                    return Err(RuntimeError::new("closure attendue dans `.find(...)`", mc.span()).into());
+                };
+                for item in items {
+                    if matches!(self.invoke_closure(&params, &body, &captured, vec![item.clone()], mc.span())?, Value::Bool(true)) {
+                        return Ok(Value::Option(Some(Box::new(item))));
+                    }
+                }
+                Ok(Value::Option(None))
+            }
+            (Value::Array(items), "position") => {
+                let Some(Value::Closure { params, body, captured }) = args.into_iter().next() else {
+                    return Err(RuntimeError::new("closure attendue dans `.position(...)`", mc.span()).into());
+                };
+                for (i, item) in items.into_iter().enumerate() {
+                    if matches!(self.invoke_closure(&params, &body, &captured, vec![item], mc.span())?, Value::Bool(true)) {
+                        return Ok(Value::Option(Some(Box::new(Value::Int(i as i64)))));
+                    }
+                }
+                Ok(Value::Option(None))
+            }
+            (Value::Array(items), "fold") => {
+                let mut acc = args.first().cloned().unwrap_or(Value::Unit);
+                let Some(Value::Closure { params, body, captured }) = args.into_iter().nth(1) else {
+                    return Err(RuntimeError::new("closure attendue dans `.fold(...)`", mc.span()).into());
+                };
+                for item in items {
+                    acc = self.invoke_closure(&params, &body, &captured, vec![acc, item], mc.span())?;
+                }
+                Ok(acc)
+            }
+            (Value::Array(items), "flat_map") => {
+                let Some(Value::Closure { params, body, captured }) = args.into_iter().next() else {
+                    return Err(RuntimeError::new("closure attendue dans `.flat_map(...)`", mc.span()).into());
+                };
+                let mut out = Vec::new();
+                for item in items {
+                    match self.invoke_closure(&params, &body, &captured, vec![item], mc.span())? {
+                        Value::Array(sub) => out.extend(sub),
+                        other => out.push(other),
+                    }
+                }
+                Ok(Value::Array(out))
+            }
+            (Value::Array(items), "zip") => {
+                let other = match args.into_iter().next() {
+                    Some(Value::Array(v)) => v,
+                    _ => vec![],
+                };
+                let zipped = items
+                    .into_iter()
+                    .zip(other)
+                    .map(|(a, b)| Value::Tuple(vec![a, b]))
+                    .collect();
+                Ok(Value::Array(zipped))
+            }
+            (Value::Array(items), "skip") => {
+                let n = match args.first() {
+                    Some(Value::Int(n)) if *n >= 0 => *n as usize,
+                    _ => 0,
+                };
+                Ok(Value::Array(items.into_iter().skip(n).collect()))
+            }
+            (Value::Array(items), "take") => {
+                let n = match args.first() {
+                    Some(Value::Int(n)) if *n >= 0 => *n as usize,
+                    _ => 0,
+                };
+                Ok(Value::Array(items.into_iter().take(n).collect()))
+            }
+            (Value::Array(items), "chain") => {
+                let other = match args.into_iter().next() {
+                    Some(Value::Array(v)) => v,
+                    _ => vec![],
+                };
+                let mut result = items;
+                result.extend(other);
+                Ok(Value::Array(result))
+            }
+            (Value::Array(items), "count") => Ok(Value::Int(items.len() as i64)),
+            (Value::Array(items), "last") => Ok(Value::Option(items.into_iter().last().map(Box::new))),
+            (Value::Array(items), "first") => Ok(Value::Option(items.into_iter().next().map(Box::new))),
+            (Value::Array(items), "max") => {
+                let result = items.into_iter().reduce(|a, b| match (&a, &b) {
+                    (Value::Int(x), Value::Int(y)) => if x >= y { a } else { b },
+                    (Value::Float(x), Value::Float(y)) => if x >= y { a } else { b },
+                    _ => a,
+                });
+                Ok(Value::Option(result.map(Box::new)))
+            }
+            (Value::Array(items), "min") => {
+                let result = items.into_iter().reduce(|a, b| match (&a, &b) {
+                    (Value::Int(x), Value::Int(y)) => if x <= y { a } else { b },
+                    (Value::Float(x), Value::Float(y)) => if x <= y { a } else { b },
+                    _ => a,
+                });
+                Ok(Value::Option(result.map(Box::new)))
+            }
+            (Value::Array(items), "product") => {
+                let mut int_prod: i64 = 1;
+                let mut float_prod: f64 = 1.0;
+                let mut is_float = false;
+                for item in items {
+                    match item {
+                        Value::Int(n) => int_prod *= n,
+                        Value::Float(f) => {
+                            is_float = true;
+                            float_prod *= f;
+                        }
+                        _ => {}
+                    }
+                }
+                Ok(if is_float { Value::Float(float_prod * int_prod as f64) } else { Value::Int(int_prod) })
+            }
+            (Value::Array(items), "windows") => {
+                let n = match args.first() {
+                    Some(Value::Int(n)) if *n > 0 => *n as usize,
+                    _ => 1,
+                };
+                let windows: Vec<Value> = items.windows(n).map(|w| Value::Array(w.to_vec())).collect();
+                Ok(Value::Array(windows))
+            }
+            (Value::Array(items), "chunks") | (Value::Array(items), "chunks_exact") => {
+                let n = match args.first() {
+                    Some(Value::Int(n)) if *n > 0 => *n as usize,
+                    _ => 1,
+                };
+                let chunks: Vec<Value> = items.chunks(n).map(|c| Value::Array(c.to_vec())).collect();
+                Ok(Value::Array(chunks))
+            }
             (Value::Range { start, end, inclusive }, "rev") => {
                 let items: Vec<Value> = if inclusive {
                     (start..=end).rev().map(Value::Int).collect()
@@ -1341,16 +1618,83 @@ impl Interpreter {
             (Value::Float(f), "round") => Ok(Value::Float(f.round())),
             (Value::Option(Some(v)), "unwrap") => Ok(*v),
             (Value::Option(None), "unwrap") => Err(RuntimeError::new("panique: `Option::unwrap()` sur `None`", mc.span()).into()),
+            (Value::Option(Some(v)), "expect") => Ok(*v),
+            (Value::Option(None), "expect") => {
+                let msg = args.first().map(Value::display_str).unwrap_or_else(|| "Option::expect() sur None".to_string());
+                Err(RuntimeError::new(msg, mc.span()).into())
+            }
             (Value::Option(Some(v)), "unwrap_or") => Ok(*v),
             (Value::Option(None), "unwrap_or") => Ok(args.into_iter().next().unwrap_or(Value::Unit)),
             (Value::Option(opt), "is_some") => Ok(Value::Bool(opt.is_some())),
             (Value::Option(opt), "is_none") => Ok(Value::Bool(opt.is_none())),
             (Value::Result(Ok(v)), "unwrap") => Ok(*v),
             (Value::Result(Err(e)), "unwrap") => Err(RuntimeError::new(format!("panique: `Result::unwrap()` sur `Err({})`", e.debug_str()), mc.span()).into()),
+            (Value::Result(Ok(v)), "expect") => Ok(*v),
+            (Value::Result(Err(e)), "expect") => {
+                let msg = args.first().map(Value::display_str).unwrap_or_else(|| "Result::expect()".to_string());
+                Err(RuntimeError::new(format!("{msg}: {}", e.debug_str()), mc.span()).into())
+            }
             (Value::Result(Ok(v)), "unwrap_or") => Ok(*v),
             (Value::Result(Err(_)), "unwrap_or") => Ok(args.into_iter().next().unwrap_or(Value::Unit)),
             (Value::Result(r), "is_ok") => Ok(Value::Bool(r.is_ok())),
             (Value::Result(r), "is_err") => Ok(Value::Bool(r.is_err())),
+            (Value::Stdin, "read_line") => {
+                if self.stdin_lines.is_empty() {
+                    self.needs_input = true;
+                    return Err(ControlFlow::NeedsInput);
+                }
+                let line = self.stdin_lines.pop_front().unwrap_or_default();
+                let bytes = line.len() as i64;
+                if let Some(arg_expr) = mc.args.first() {
+                    if let Some(var_name) = extract_mut_var_name(arg_expr) {
+                        let cur = match env.get(&var_name) {
+                            Some(Value::Str(s)) => s.clone(),
+                            _ => String::new(),
+                        };
+                        env.set(&var_name, Value::Str(format!("{cur}{line}")));
+                    }
+                }
+                Ok(Value::Result(Ok(Box::new(Value::Int(bytes)))))
+            }
+            (Value::Stdout, "flush") => Ok(Value::Result(Ok(Box::new(Value::Unit)))),
+            (Value::Command { cmd, mut args_list, envs }, "arg") => {
+                let a = args.into_iter().next().map(|v| v.display_str()).unwrap_or_default();
+                args_list.push(a);
+                Ok(Value::Command { cmd, args_list, envs })
+            }
+            (Value::Command { cmd, mut args_list, envs }, "args") => {
+                if let Some(Value::Array(items)) = args.into_iter().next() {
+                    for item in items {
+                        args_list.push(item.display_str());
+                    }
+                }
+                Ok(Value::Command { cmd, args_list, envs })
+            }
+            (Value::Command { cmd, args_list, mut envs }, "env") => {
+                let k = args.first().map(Value::display_str).unwrap_or_default();
+                let v = args.get(1).map(Value::display_str).unwrap_or_default();
+                envs.push((k, v));
+                Ok(Value::Command { cmd, args_list, envs })
+            }
+            (Value::Command { cmd, args_list, envs }, "current_dir") => {
+                Ok(Value::Command { cmd, args_list, envs })
+            }
+            (Value::Command { cmd, .. }, "output")
+            | (Value::Command { cmd, .. }, "status")
+            | (Value::Command { cmd, .. }, "spawn") => {
+                let msg = format!("Commande `{cmd}` non exécutable sur Android (sandbox)");
+                Ok(Value::Result(Err(Box::new(Value::Str(msg)))))
+            }
+            (Value::Map(m), "len") => Ok(Value::Int(m.len() as i64)),
+            (Value::Map(m), "is_empty") => Ok(Value::Bool(m.is_empty())),
+            (Value::Map(m), "get") => {
+                let key = args.first().map(Value::display_str).unwrap_or_default();
+                Ok(Value::Option(m.get(&key).cloned().map(Box::new)))
+            }
+            (Value::Map(m), "contains_key") => {
+                let key = args.first().map(Value::display_str).unwrap_or_default();
+                Ok(Value::Bool(m.contains_key(&key)))
+            }
             (other, m) => Err(RuntimeError::new(
                 format!("méthode `{m}` non supportée sur `{}`", other.type_name()),
                 mc.span(),
@@ -1770,12 +2114,26 @@ fn eval_cmp(a: &Value, b: &Value, span: proc_macro2::Span) -> Result<std::cmp::O
     }
 }
 
+fn extract_mut_var_name(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Reference(r) => extract_mut_var_name(&r.expr),
+        Expr::Paren(p) => extract_mut_var_name(&p.expr),
+        Expr::Path(p) => p.path.get_ident().map(|id| id.to_string()),
+        _ => None,
+    }
+}
+
 pub fn run_rust(code: &str) -> RunResult {
+    run_rust_with_stdin(code, "")
+}
+
+pub fn run_rust_with_stdin(code: &str, stdin: &str) -> RunResult {
     let (compile, parsed) = check_rust(code);
     let Some(file) = parsed else {
         return RunResult {
             success: false,
             timed_out: false,
+            needs_input: false,
             exit_code: None,
             stdout: String::new(),
             stderr: String::new(),
@@ -1786,7 +2144,7 @@ pub fn run_rust(code: &str) -> RunResult {
     };
 
     let started = Instant::now();
-    let mut interp = Interpreter::new();
+    let mut interp = Interpreter::new(stdin);
     let exec_res = interp
         .load_file(&file)
         .and_then(|_| interp.call_fn("main", vec![], proc_macro2::Span::call_site()));
@@ -1796,7 +2154,19 @@ pub fn run_rust(code: &str) -> RunResult {
         Ok(_) => RunResult {
             success: true,
             timed_out: false,
+            needs_input: false,
             exit_code: Some(0),
+            stdout: interp.stdout,
+            stderr: interp.stderr,
+            duration_ms,
+            truncated: interp.truncated,
+            compile,
+        },
+        Err(ControlFlow::NeedsInput) => RunResult {
+            success: true,
+            timed_out: false,
+            needs_input: true,
+            exit_code: None,
             stdout: interp.stdout,
             stderr: interp.stderr,
             duration_ms,
@@ -1826,6 +2196,7 @@ pub fn run_rust(code: &str) -> RunResult {
             RunResult {
                 success: false,
                 timed_out: err.timed_out,
+                needs_input: false,
                 exit_code: Some(1),
                 stdout: interp.stdout,
                 stderr: interp.stderr,
@@ -1837,6 +2208,7 @@ pub fn run_rust(code: &str) -> RunResult {
         Err(_) => RunResult {
             success: true,
             timed_out: false,
+            needs_input: false,
             exit_code: Some(0),
             stdout: interp.stdout,
             stderr: interp.stderr,

@@ -66,6 +66,7 @@ class RunResult {
   const RunResult({
     required this.success,
     required this.timedOut,
+    this.needsInput = false,
     required this.exitCode,
     required this.stdout,
     required this.stderr,
@@ -76,6 +77,7 @@ class RunResult {
 
   final bool success;
   final bool timedOut;
+  final bool needsInput;
   final int? exitCode;
   final String stdout;
   final String stderr;
@@ -87,6 +89,7 @@ class RunResult {
     return RunResult(
       success: json['success'] as bool? ?? false,
       timedOut: json['timed_out'] as bool? ?? false,
+      needsInput: json['needs_input'] as bool? ?? false,
       exitCode: (json['exit_code'] as num?)?.toInt(),
       stdout: json['stdout'] as String? ?? '',
       stderr: json['stderr'] as String? ?? '',

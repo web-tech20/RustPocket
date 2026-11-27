@@ -8,7 +8,7 @@ use std::os::raw::c_char;
 
 pub use checker::check_rust;
 pub use formatter::format_rust;
-pub use interpreter::run_rust;
+pub use interpreter::{run_rust, run_rust_with_stdin};
 pub use models::{CompileResult, Diagnostic, FormatResult, RunResult};
 
 fn to_c_json<T: serde::Serialize>(value: &T) -> *mut c_char {
@@ -58,6 +58,18 @@ pub unsafe extern "C" fn rustpocket_check(code_ptr: *const c_char) -> *mut c_cha
 pub unsafe extern "C" fn rustpocket_run(code_ptr: *const c_char) -> *mut c_char {
     let code = unsafe { read_c_str(code_ptr) };
     let result = run_rust(&code);
+    to_c_json(&result)
+}
+
+/// Parses and executes Rust code with standard input, returning a JSON-encoded `RunResult`.
+#[no_mangle]
+pub unsafe extern "C" fn rustpocket_run_with_stdin(
+    code_ptr: *const c_char,
+    stdin_ptr: *const c_char,
+) -> *mut c_char {
+    let code = unsafe { read_c_str(code_ptr) };
+    let stdin = unsafe { read_c_str(stdin_ptr) };
+    let result = run_rust_with_stdin(&code, &stdin);
     to_c_json(&result)
 }
 
@@ -168,5 +180,122 @@ fn main() {
         let res = format_rust("fn main() {\nprintln!(\"hi\");\n}\n");
         assert!(res.ok);
         assert_eq!(res.code, "fn main() {\n    println!(\"hi\");\n}\n");
+    }
+
+    #[test]
+    fn stdin_read_line_works() {
+        use interpreter::run_rust_with_stdin;
+        let code = r#"
+use std::io;
+fn main() {
+    println!("=== TEST STDIN ===");
+    let mut nom = String::new();
+    println!("Quel est ton nom ?");
+    io::stdin().read_line(&mut nom).expect("Erreur de lecture");
+    let nom = nom.trim();
+    println!("Bonjour {}, Rust fonctionne !", nom);
+    let a = 15;
+    let b = 25;
+    println!("{} + {} = {}", a, b, a + b);
+    println!("=== FIN DU TEST ===");
+}
+"#;
+        let res = run_rust_with_stdin(code, "Alice\n");
+        assert!(res.success, "stderr: {}", res.stderr);
+        assert!(res.stdout.contains("Bonjour Alice, Rust fonctionne !"), "stdout: {}", res.stdout);
+        assert!(res.stdout.contains("15 + 25 = 40"), "stdout: {}", res.stdout);
+    }
+
+    #[test]
+    fn hashmap_works() {
+        let code = r#"
+use std::collections::HashMap;
+fn main() {
+    let mut scores: HashMap<String, i32> = HashMap::new();
+    scores.insert(String::from("Alice"), 100);
+    scores.insert(String::from("Bob"), 85);
+    println!("Alice: {}", scores.get("Alice").unwrap_or(&0));
+    println!("Bob: {}", scores.get("Bob").unwrap_or(&0));
+    println!("contient Alice: {}", scores.contains_key("Alice"));
+    scores.remove("Bob");
+    println!("contient Bob après remove: {}", scores.contains_key("Bob"));
+}
+"#;
+        let res = run_rust(code);
+        assert!(res.success, "stderr: {}", res.stderr);
+        assert!(res.stdout.contains("Alice: 100"), "stdout: {}", res.stdout);
+        assert!(res.stdout.contains("contient Alice: true"), "stdout: {}", res.stdout);
+        assert!(res.stdout.contains("contient Bob après remove: false"), "stdout: {}", res.stdout);
+    }
+
+    #[test]
+    fn needs_input_signal_works() {
+        let code = r#"
+use std::io;
+fn main() {
+    println!("=== TEST RUST ===");
+    let mut nom = String::new();
+    println!("Quel est ton nom ?");
+    io::stdin().read_line(&mut nom).expect("erreur");
+    println!("Bonjour {}, Rust fonctionne correctement !", nom.trim());
+}
+"#;
+        let res1 = run_rust_with_stdin(code, "");
+        assert!(res1.needs_input, "devrait signaler needs_input");
+        assert!(res1.stdout.contains("Quel est ton nom ?"));
+
+        let res2 = run_rust_with_stdin(code, "noe\n");
+        assert!(!res2.needs_input);
+        assert!(res2.success, "stderr: {}", res2.stderr);
+        assert!(res2.stdout.contains("Bonjour noe, Rust fonctionne correctement !"), "stdout: {}", res2.stdout);
+    }
+
+    #[test]
+    fn iterator_methods_work() {
+        let res = run_rust(
+            r#"
+fn main() {
+    let nums = vec![1, 2, 3, 4, 5];
+    let sum = nums.iter().fold(0, |acc, x| acc + x);
+    println!("fold sum: {}", sum);
+    let evens = nums.iter().filter(|x| x % 2 == 0).collect();
+    println!("pairs: {:?}", evens);
+    println!("contient 3: {}", nums.iter().any(|x| x == 3));
+    println!("tous positifs: {}", nums.iter().all(|x| x > 0));
+    println!("premier > 3: {:?}", nums.iter().find(|x| x > 3));
+    println!("count: {}", nums.iter().count());
+    let s = "un deux trois";
+    println!("mots: {:?}", s.split_whitespace());
+}
+"#,
+        );
+        assert!(res.success, "stderr: {}", res.stderr);
+        assert!(res.stdout.contains("fold sum: 15"), "stdout: {}", res.stdout);
+        assert!(res.stdout.contains("contient 3: true"), "stdout: {}", res.stdout);
+        assert!(res.stdout.contains("tous positifs: true"), "stdout: {}", res.stdout);
+        assert!(res.stdout.contains("count: 5"), "stdout: {}", res.stdout);
+    }
+
+    #[test]
+    fn async_and_command_work() {
+        let res = run_rust(
+            r#"
+use std::process::Command;
+
+async fn calcul() -> i32 {
+    21 * 2
+}
+
+fn main() {
+    let v = calcul().await;
+    println!("async: {}", v);
+    let out = Command::new("bluetoothctl").arg("scan").output();
+    println!("cmd is_err: {}", out.is_err());
+}
+"#,
+        );
+        assert!(res.success, "stderr: {}", res.stderr);
+        assert!(res.stdout.contains("async: 42"), "stdout: {}", res.stdout);
+        assert!(res.stdout.contains("cmd is_err: true"), "stdout: {}", res.stdout);
     }
 }

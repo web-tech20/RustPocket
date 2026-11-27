@@ -23,7 +23,8 @@ class ApiClient {
 
   Future<CompileResult> check(String code) => _local.check(code);
 
-  Future<RunResult> run(String code) => _local.run(code);
+  Future<RunResult> run(String code, {String stdin = ''}) =>
+      _local.run(code, stdin: stdin);
 
   Future<String> format(String code) async {
     try {

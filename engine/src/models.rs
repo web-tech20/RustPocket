@@ -22,6 +22,7 @@ pub struct CompileResult {
 pub struct RunResult {
     pub success: bool,
     pub timed_out: bool,
+    pub needs_input: bool,
     pub exit_code: Option<i32>,
     pub stdout: String,
     pub stderr: String,
